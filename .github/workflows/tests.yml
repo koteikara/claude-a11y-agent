@@ -1,0 +1,38 @@
+name: a11y-regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:        # 手動実行（LLMテスト込み）
+  schedule:
+    - cron: "0 18 * * 0"    # 毎週日曜 03:00 JST にLLM回帰
+
+jobs:
+  # 機械32関数＋プロンプト雛形/契約のオフライン検証（毎push・PR）
+  mechanical:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest lxml
+      - name: 機械＋オフラインプロンプトテスト
+        run: pytest -q          # @llm は RUN_LLM_TESTS 未設定で自動スキップ
+
+  # 実LLMによるプロンプト回帰（手動 or スケジュールのみ）
+  llm:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      LLM_PROVIDER: gemini
+      RUN_LLM_TESTS: "1"
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest lxml google-generativeai
+      - name: 実LLMプロンプト回帰
+        run: pytest -q -m llm

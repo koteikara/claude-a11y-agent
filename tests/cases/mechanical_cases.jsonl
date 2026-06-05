@@ -1,0 +1,27 @@
+{"id": "M-R07-1", "rule": "HTML-R-07", "func": "fix_kisyu_izon", "input": "①図書館", "expected": "1図書館", "kind": "equals"}
+{"id": "M-R07-2", "rule": "HTML-R-07", "func": "fix_kisyu_izon", "input": "㈱スマートバリュー", "expected": "（株）スマートバリュー", "kind": "equals"}
+{"id": "M-R07-3", "rule": "HTML-R-07", "func": "fix_kisyu_izon", "input": "第Ⅲ章", "expected": "第3章", "kind": "equals"}
+{"id": "M-R10-1", "rule": "HTML-R-10", "func": "fix_fullwidth_alnum", "input": "ＡＢＣ１２３", "expected": "ABC123", "kind": "equals"}
+{"id": "M-R10-2", "rule": "HTML-R-10", "func": "fix_fullwidth_alnum", "input": "ＴＥＬ：０１２０", "expected": "TEL:0120", "kind": "equals"}
+{"id": "M-R09-1", "rule": "HTML-R-09", "func": "fix_units", "input": "砂糖100g", "expected": "砂糖100グラム", "kind": "equals"}
+{"id": "M-R09-2", "rule": "HTML-R-09", "func": "fix_units", "input": "5cm四方", "expected": "5センチメートル四方", "kind": "equals"}
+{"id": "M-R09-3", "rule": "HTML-R-09", "func": "fix_units", "input": "￥1,000", "expected": "1,000円", "kind": "equals"}
+{"id": "M-R09-guard", "rule": "HTML-R-09", "func": "fix_units", "input": "100grade の評価", "expected": "100grade の評価", "note": "英単語の一部は非変換(COMMON-M-01)", "kind": "equals"}
+{"id": "M-R17-1", "rule": "HTML-R-17", "func": "fix_leading_space", "input": "　　本文です", "expected": "  本文です", "kind": "equals"}
+{"id": "M-R17-2", "rule": "HTML-R-17", "func": "fix_leading_space", "input": "通常の段落", "expected": "通常の段落", "kind": "equals"}
+{"id": "M-R04-1", "rule": "HTML-R-04", "func": "fix_inword_space", "input": "じ む き ょ く", "expected": "じむきょく", "kind": "equals"}
+{"id": "M-R04-2", "rule": "HTML-R-04", "func": "fix_inword_space", "input": "単 語", "expected": "単語", "kind": "equals"}
+{"id": "M-R04-xfail", "rule": "HTML-R-04", "func": "fix_inword_space", "input": "単語 広辞苑 四字熟語", "expected": "単語 広辞苑 四字熟語", "xfail": true, "note": "複数単語の区切りスペースは保持が正だが、CJK隣接ルールでは誤結合する→AI/辞書へ要エスカレーション", "kind": "equals"}
+{"id": "M-F02-1", "rule": "FILE-R-02", "func": "strip_file_meta", "input": "委任状（PDF：56.3KB)", "expected": "委任状", "kind": "equals"}
+{"id": "M-F02-2", "rule": "FILE-R-02", "func": "strip_file_meta", "input": "申請書(PDF: 2MB)はこちら", "expected": "申請書はこちら", "kind": "equals"}
+{"id": "M-MB02-1", "rule": "MOBILE-R-02", "func": "mobile_subheading", "input": "お知らせ", "expected": "■お知らせ", "kind": "equals"}
+{"id": "M-MB02-2", "rule": "MOBILE-R-02", "func": "mobile_subheading", "input": "■既に付与済み", "expected": "■既に付与済み", "kind": "equals"}
+{"id": "M-R18-1", "rule": "HTML-R-18", "func": "fix_telfax", "input": "TEL：0120-000-000", "expected_text": "電話番号：0120-000-000", "expected_review": false, "kind": "telfax"}
+{"id": "M-R18-2", "rule": "HTML-R-18", "func": "fix_telfax", "input": "FAXでお送りください", "expected_text": "ファックスでお送りください", "expected_review": false, "kind": "telfax"}
+{"id": "M-R18-guard", "rule": "HTML-R-18", "func": "fix_telfax", "input": "GRAND HOTEL 案内", "expected_text": "GRAND HOTEL 案内", "expected_review": true, "note": "語中のTEL/FAXは非変換＋質問フラグ", "kind": "telfax"}
+{"id": "M-S02-1", "rule": "SKIP-02", "func": "is_skip_link", "href": "https://get.adobe.com/jp/reader/", "anchor": "Adobe Readerのダウンロード", "expected": true, "kind": "bool"}
+{"id": "M-S03-1", "rule": "SKIP-03", "func": "is_skip_link", "href": "https://www.weblio.jp/content/用語", "anchor": "用語解説", "expected": true, "kind": "bool"}
+{"id": "M-S0x-neg", "rule": "LINK-R-01", "func": "is_skip_link", "href": "https://example.lg.jp/page", "anchor": "関連ページ", "expected": false, "kind": "bool"}
+{"id": "M-MAP02-1", "rule": "MAP-R-02", "func": "is_bigmap_link", "href": "https://maps.google.com/?q=...", "anchor": "大きな地図を見る", "expected": true, "kind": "bool"}
+{"id": "M-MB04-1", "rule": "MOBILE-R-04", "func": "is_backtop_link", "href": "#top", "anchor": "トップページへ戻る", "expected": true, "single_arg": true, "kind": "bool"}
+{"id": "M-MB04-neg", "rule": "MOBILE-R-04", "func": "is_backtop_link", "href": "/about", "anchor": "概要", "expected": false, "single_arg": true, "kind": "bool"}
