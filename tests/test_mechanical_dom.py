@@ -77,3 +77,12 @@ def test_is_internal_url():
     assert M.is_internal_url("https://city.example.lg.jp/x", cms, {}) is True
     assert M.is_internal_url("https://old.example/p1", set(), umap) is True
     assert M.is_internal_url("https://外部.example.com/x", cms, {}) is False
+
+
+def test_normalize_bold_uppercase_style_property():
+    t = _tree('<p style="FONT-WEIGHT:700;color:#000">太字</p>')
+    M.normalize_bold(t)
+    assert t.xpath("//strong/text()") == ["太字"]
+    style = t.xpath("//p")[0].get("style") or ""
+    assert "font-weight" not in style.lower()
+    assert "color:#000" in style

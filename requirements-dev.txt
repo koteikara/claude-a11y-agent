@@ -1,5 +1,3 @@
 pytest>=8.0
 lxml>=5.0
-# オンライン(@llm)テストを動かす場合のみ:
-google-generativeai>=0.7   ; extra == "gemini"
-anthropic>=0.39            ; extra == "claude"
+# オンライン(@llm)テストを動かす場合は requirements-llm-*.txt を追加インストールする。
