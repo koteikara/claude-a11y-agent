@@ -17,7 +17,8 @@ Claude-A11y Agent v2.0 の Rule ステージ向け。検出も修正も決定的
 """
 
 import re
-import unicodedata
+from urllib.parse import urlparse
+
 from lxml import etree, html
 
 # ============================================================================
@@ -122,9 +123,13 @@ def fix_inword_space(text: str) -> str:
 
 # --- FILE-R-02 リンク文言内の形式・容量表記削除（p53） -----------------------
 # 例: 「申請書(PDF: 2MB)」「○○ [Word 1.2 MB]」「（ＰＤＦ：３００ＫＢ）」
+_FILE_TYPE_PAT = (
+    r"PDF|ＰＤＦ|Word|Ｗｏｒｄ|Excel|Ｅｘｃｅｌ|PowerPoint|ＰｏｗｅｒＰｏｉｎｔ|"
+    r"DOCX?|ＤＯＣＸ?|XLSX?|ＸＬＳＸ?|PPTX?|ＰＰＴＸ?|ZIP|ＺＩＰ|テキスト"
+)
 _FILEMETA_RE = re.compile(
-    r"\s*[（(\[【]\s*(?:PDF|Word|Excel|PowerPoint|DOCX?|XLSX?|PPTX?|ZIP|テキスト)?"
-    r"[\s:：]*\d+(?:\.\d+)?\s*(?:[KMG]?B|バイト)\s*[)）\]】]",
+    rf"\s*[（(\[【]\s*(?:{_FILE_TYPE_PAT})?"
+    r"[\s:：]*[\d０-９]+(?:[.．][\d０-９]+)?\s*(?:[KMGＫＭＧ]?[BＢ]|バイト)\s*[)）\]】]",
     re.IGNORECASE,
 )
 def strip_file_meta(text: str) -> str:
@@ -233,7 +238,7 @@ def normalize_bold(tree):
     """HTML-R-02: 太字を保持しつつ <b>→<strong>、font-weight:bold→<strong>へ正規化。"""
     for el in tree.xpath("//b"):
         el.tag = "strong"
-    for el in tree.xpath("//*[contains(@style,'font-weight')]"):
+    for el in tree.xpath("//*[@style]"):
         style = el.get("style", "")
         if re.search(r"font-weight\s*:\s*(bold|[6-9]00)", style, re.I):
             strong = etree.SubElement(el, "strong")
@@ -307,7 +312,12 @@ def is_internal_url(href: str, cms_domains: set, url_map: dict) -> bool:
         return False
     if href in url_map:                       # 旧URL→新ページIDが存在
         return True
-    host = re.sub(r"^https?://", "", href).split("/")[0].lower()
+    parsed = urlparse(href)
+    if not parsed.scheme and not parsed.netloc:
+        return True
+    if parsed.scheme and parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    host = parsed.netloc.lower()
     return any(host == d or host.endswith("." + d) for d in cms_domains)
 
 _FILE_EXT_RE = re.compile(r"\.(pdf|docx?|xlsx?|pptx?|zip|csv)(\?|$)", re.I)

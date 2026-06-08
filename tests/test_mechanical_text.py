@@ -45,3 +45,17 @@ def test_bool(c):
     else:
         result = func(c["href"], c["anchor"])
     assert result is c["expected"]
+
+
+def test_strip_file_meta_fullwidth_notation():
+    assert M.strip_file_meta("申請書（ＰＤＦ：３００ＫＢ）") == "申請書"
+
+
+def test_relative_file_link_is_internal_file():
+    assert M.is_internal_url("/files/report.pdf", {"city.example.lg.jp"}, {}) is True
+    assert M.is_external_file_link("/files/report.pdf", {"city.example.lg.jp"}) is False
+
+
+def test_non_http_file_link_is_not_internal_file():
+    assert M.is_internal_url("ftp://example.com/report.pdf", {"example.com"}, {}) is False
+    assert M.is_external_file_link("ftp://example.com/report.pdf", {"example.com"}) is True
