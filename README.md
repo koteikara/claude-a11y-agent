@@ -47,3 +47,71 @@ pytest -m llm
 ## CI（.github/workflows/tests.yml）
 - `mechanical` ジョブ: 毎 push・PR でオフライン一式。
 - `llm` ジョブ: `workflow_dispatch`（手動）/ `schedule`（週次）でのみ。`secrets.GEMINI_API_KEY` を使用。
+
+## HTMLペア回帰テスト（old / ai / gold）
+
+移行元HTMLと人が確認した期待HTMLを、実体ファイルとJSONL索引で回帰資産化するための仕組みです。
+
+### 3系統の役割
+
+| stage | 意味 | テスト上の扱い |
+|---|---|---|
+| `old` | 移行元HTML（処理前の入力） | `baseline:"old"` を持つチェックだけが比較対象にします。 |
+| `ai` | AIを通して生成した出力（任意のスナップショット） | `ai`↔`gold` のドリフト比較にだけ使います。差分は情報出力で、失敗にはしません。 |
+| `gold` | 人が確認した期待出力（正・ゴールド） | 検証の主対象です。hardチェックは `gold` に対して失敗を検出します。 |
+
+### ディレクトリ規約と追加手順
+
+HTML fixture は次の規約で配置します。
+
+```text
+tests/fixtures/html/{site}/{stage}/{page_id}.html
+```
+
+- `stage` は `old` / `ai` / `gold` のいずれかです。
+- `old` と `gold` は必須で、厳密に `{page_id}.html` を置きます。
+- `ai` は任意です。生成日などの接尾辞を許容し、`{page_id}.html` または `{page_id}_0820.html` のように `_` 区切りで置けます。
+- 空ディレクトリを保持するため、各 `old` / `ai` / `gold` に `.gitkeep` を置いています。
+
+ペアを追加するときは、`old` と `gold` のHTMLを置き、`tests/cases/html_pairs.jsonl` に1行追加するだけです。`ai` は任意で、存在する場合だけドリフト比較が走ります。
+
+索引1行の主なキーは `id`, `site`, `page_id`, `has_ai`, `body_xpath`, `exercises`, `checks` です。`body_xpath` を省略した場合は文書全体を対象にします。
+
+### check カタログ要約
+
+| 分類 | check | 概要 |
+|---|---|---|
+| 機械判定（hard） | `no_tag` | `font`, `u`, `s`, `strike`, `i`, `center`, `graphic`, `html`, `body`, `head` などの禁止タグが無いこと。 |
+| 機械判定（hard） | `no_anchor_text` | `<a>` テキストに「こちら」「ここ」「詳細」などの指示語を含まないこと。 |
+| 機械判定（hard） | `anchor_href_present` | 全 `<a>` が非空の `href` を持つこと。 |
+| 機械判定（hard） | `href_no_pattern` | `<a href>` が指定正規表現（例: `[?&]smf=`）に一致しないこと。 |
+| 機械判定（hard） | `no_short_weekday` | `（月）` のような短縮曜日表記が無いこと。 |
+| 機械判定（hard） | `alt_present` | 全 `<img>` が `alt` 属性を持つこと（空altは可）。 |
+| 機械判定（hard） | `no_id` | 共通パーツ由来の `id` が無いこと。 |
+| 機械判定（hard） | `no_layout_table` | `<th>` を持たず、`border="0"` または `class` に `nb` / `layout` を含む表が無いこと。 |
+| 機械判定（hard） | `no_consecutive_br` | 連続 `<br>` が無いこと。 |
+| 機械判定（hard） | `tag_count_not_decreased` | `baseline:"old"` と比較し、指定タグ数が減っていないこと。既定では `iframe` 用です。 |
+| 助言判定（advisory） | `no_attr` | `align`, `bgcolor`, `cellpadding`, `cellspacing`, `valign`, `nowrap` などのレガシー表示属性を警告します。 |
+| 助言判定（advisory） | `text_coverage` | `gold` の可視テキスト長 ÷ `old` の可視テキスト長が指定比率以上かを警告します。 |
+| 実装あり・既定不採用 | `attr_whitelist` | 全属性が許可リスト内かを確認します。このCMSの `gold` は `class` 等を保持するため既定索引では使いません。 |
+| 非機械 | alt内容の公式充足 | 「主題＋様子＋付加情報＋種類」の充足はLLMまたは人手レビューで担保します。 |
+| 非機械 | 年号の文脈補完 | 文脈推測が必要な年号補完はLLMまたは人手レビューで担保します。 |
+
+未知の `check.type` が索引に現れた場合は、将来拡張に備えて失敗ではなくスキップと警告にします。
+
+### 比較前処理（CMS自動付与属性の除去）
+
+`gold` は対象CMSがHTML出力した結果であり、`class` / `id` / `style` / `role` / `aria-*` / `data-*` などは人間の意図ではなくCMSが自動付与した副産物を含みます。そのため `ai`↔`gold` ドリフト比較と `@e2e` 比較では、比較時のメモリ上コピーから次の属性を剥がしてから正規化します。
+
+- 除去する属性: `class`, `style`, `id`, `role`, `tabindex`, `target`, `width`, `height`, `aria-*`, `data-*`, `border`, `cellpadding`, `cellspacing`, `allow`, `allowfullscreen`, `frameborder`, `referrerpolicy`, `scrolling`
+- 残す意味属性: `href`, `src`, `alt`, `scope`, `colspan`, `rowspan`, `summary`, `title`, `lang`
+
+`gold` ファイル自体は加工せず、`strip_cms_attrs()` を適用したコピーだけを比較に使います。
+
+### 実行方法
+
+```bash
+pytest -q                         # 既存テスト＋HTMLペア。未配置ペアは自動スキップ
+pytest -m drift                   # ai↔goldドリフト確認（差分は情報出力）
+RUN_E2E=1 pytest -m e2e           # pipeline本体が接続できる場合だけ実行
+```
