@@ -73,7 +73,7 @@ tests/fixtures/html/{site}/{stage}/{page_id}.html
 - `ai` は任意です。生成日などの接尾辞を許容し、`{page_id}.html` または `{page_id}_0820.html` のように `_` 区切りで置けます。
 - 空ディレクトリを保持するため、各 `old` / `ai` / `gold` に `.gitkeep` を置いています。
 
-ペアを追加するときは、`old` と `gold` のHTMLを置き、`tests/cases/html_pairs.jsonl` に1行追加するだけです。`ai` は任意で、存在する場合だけドリフト比較が走ります。
+ペアを追加するときは、`old` と `gold` のHTMLを置き、`tests/cases/html_pairs.jsonl` に1行追加するだけです。`ai` は任意で、存在する場合だけドリフト比較が走ります。HTMLペア回帰は大きなfixture更新で通常CIを止めないよう、`RUN_HTML_PAIRS=1` を付けたときだけ実行します。
 
 索引1行の主なキーは `id`, `site`, `page_id`, `has_ai`, `body_xpath`, `exercises`, `checks` です。`body_xpath` を省略した場合は文書全体を対象にします。
 
@@ -111,7 +111,8 @@ tests/fixtures/html/{site}/{stage}/{page_id}.html
 ### 実行方法
 
 ```bash
-pytest -q                         # 既存テスト＋HTMLペア。未配置ペアは自動スキップ
-pytest -m drift                   # ai↔goldドリフト確認（差分は情報出力）
-RUN_E2E=1 pytest -m e2e           # pipeline本体が接続できる場合だけ実行
+pytest -q                                      # 通常CI: 既存の機械＋オフラインプロンプト（HTMLペアは自動スキップ）
+RUN_HTML_PAIRS=1 pytest -m html_pairs         # goldチェック＋ai↔goldドリフト。未配置ペアは自動スキップ
+RUN_HTML_PAIRS=1 pytest -m drift              # ai↔goldドリフト確認（差分は情報出力）
+RUN_HTML_PAIRS=1 RUN_E2E=1 pytest -m e2e      # pipeline本体が接続できる場合だけ実行
 ```

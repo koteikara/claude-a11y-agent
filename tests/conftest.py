@@ -78,6 +78,7 @@ def fixture_path(site, stage, page_id):
 def load_body(path, body_xpath=None):
     """HTMLをlxmlでパースし、body_xpath指定時は該当要素を返す。"""
 
+    pytest.importorskip("lxml")
     from a11y_testkit.htmlpairs import parse_html_document
 
     source = Path(path).read_text(encoding="utf-8", errors="replace")
@@ -119,6 +120,10 @@ def pytest_collection_modifyitems(config, items):
         reason = "set RUN_LLM_TESTS=1" if not run_llm else f"missing {key_env}"
         llm_skip = pytest.mark.skip(reason=f"LLMテストはスキップ: {reason}")
 
+    html_pairs_skip = None
+    if os.getenv("RUN_HTML_PAIRS") != "1":
+        html_pairs_skip = pytest.mark.skip(reason="HTMLペア回帰はスキップ: set RUN_HTML_PAIRS=1")
+
     e2e_skip = None
     if os.getenv("RUN_E2E") != "1":
         e2e_skip = pytest.mark.skip(reason="E2Eテストはスキップ: set RUN_E2E=1")
@@ -126,5 +131,7 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if llm_skip is not None and "llm" in item.keywords:
             item.add_marker(llm_skip)
+        if html_pairs_skip is not None and "html_pairs" in item.keywords:
+            item.add_marker(html_pairs_skip)
         if e2e_skip is not None and "e2e" in item.keywords:
             item.add_marker(e2e_skip)

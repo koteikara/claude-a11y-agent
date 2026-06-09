@@ -9,13 +9,12 @@ import warnings
 
 import pytest
 
-pytest.importorskip("lxml")
-
-from a11y_testkit.htmlpairs import drift_element_diff_count, normalized_html, visible_text_len
 from conftest import fixture_path, load_body
 
 
 UNKNOWN_CHECK_MESSAGE = "未知のcheck種別"
+
+pytestmark = pytest.mark.html_pairs
 
 
 def _required_fixture_paths(pair):
@@ -54,6 +53,9 @@ def test_ai_gold_drift(html_pair):
         pytest.skip(f"AI fixture未配置: {html_pair['id']}")
 
     body_xpath = html_pair.get("body_xpath")
+    pytest.importorskip("lxml")
+    from a11y_testkit.htmlpairs import drift_element_diff_count, normalized_html
+
     ai_body = load_body(ai_path, body_xpath)
     gold_body = load_body(gold_path, body_xpath)
     ai_normalized = normalized_html(ai_body)
@@ -205,6 +207,9 @@ def _check_attr_whitelist(check, gold_body, old_body):
 
 
 def _check_text_coverage(check, gold_body, old_body):
+    pytest.importorskip("lxml")
+    from a11y_testkit.htmlpairs import visible_text_len
+
     min_ratio = float(check.get("min_ratio", 0.6))
     old_len = visible_text_len(old_body)
     gold_len = visible_text_len(gold_body)
