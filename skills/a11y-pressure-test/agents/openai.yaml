@@ -1,0 +1,4 @@
+interface:
+  display_name: "A11y Pressure Test"
+  short_description: "Stress-test a11y regression fixes offline."
+  default_prompt: "Use $a11y-pressure-test to pressure-test this accessibility regression fix and report readiness."
