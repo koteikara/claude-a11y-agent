@@ -7,7 +7,7 @@ import argparse
 import json
 
 from .drive import GoogleDriveStore
-from .runner import check_gold, dry_run, init_sheet, run_jobs
+from .runner import check_gold, dry_run, init_sheet, promote_requested_gold, run_jobs
 from .sheets import GspreadSheetStore
 
 
@@ -29,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     check_parser.add_argument("--site", help="対象 site で絞り込み")
     check_parser.add_argument("--pairs", default="tests/cases/html_pairs.jsonl", help="html_pairs JSONL パス")
 
+    promote_parser = sub.add_parser("promote", help="approved かつ promote_requested の ai HTML を gold にコピーします")
+    promote_parser.add_argument("--sheet", required=True, help="Google Sheets ID")
+
     args = parser.parse_args(argv)
     sheets = GspreadSheetStore(args.sheet)
 
@@ -48,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "check":
         print(json.dumps(check_gold(sheets, drive, site=args.site, pairs_path=args.pairs), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "promote":
+        print(json.dumps({"n_promoted": promote_requested_gold(sheets, drive)}, ensure_ascii=False, indent=2))
         return 0
     return 2
 

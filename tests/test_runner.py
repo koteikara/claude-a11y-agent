@@ -6,7 +6,7 @@ import pytest
 
 from a11y_runner.drive import InMemoryDriveStore
 from a11y_runner.models import PageResult, ReviewItem
-from a11y_runner.runner import check_gold, dry_run, init_sheet, run_jobs
+from a11y_runner.runner import check_gold, dry_run, init_sheet, promote_requested_gold, run_jobs
 from a11y_runner.schema import CONFIG_TAB, JOBS_TAB, METRICS_TAB, REVIEW_TAB, RUNS_TAB, TAB_HEADERS
 from a11y_runner.sheets import InMemorySheetStore
 
@@ -115,6 +115,45 @@ def test_check_gold_records_metrics_and_review_rows(tmp_path: Path):
     assert summary["advisory_hits"] == 1
     assert store.rows[METRICS_TAB][0]["checks_failed"] == 1
     assert [row["rule_id"] for row in store.rows[REVIEW_TAB]] == ["no_anchor_text", "no_attr"]
+
+
+def test_promote_requested_gold_copies_approved_ai_to_gold():
+    store = _store_with_config()
+    store.rows[JOBS_TAB] = [{
+        "job_id": "job-1",
+        "site": "saga-city",
+        "page_id": "sg00001",
+        "status": "needs_review",
+        "review_status": "approved",
+        "promote_requested": "true",
+    }]
+    drive = InMemoryDriveStore({("ai", "saga-city/sg00001.html"): "<p>approved</p>"})
+
+    promoted = promote_requested_gold(store, drive)
+
+    assert promoted == 1
+    assert drive.files[("gold", "saga-city/sg00001.html")] == "<p>approved</p>"
+    assert store.rows[JOBS_TAB][0]["gold_output_link"] == "drive://gold/saga-city/sg00001.html"
+    assert store.rows[JOBS_TAB][0]["promote_requested"] == "false"
+
+
+def test_run_jobs_promotes_approved_rows_even_without_queued_jobs():
+    store = _store_with_config()
+    store.rows[JOBS_TAB] = [{
+        "job_id": "job-1",
+        "site": "saga-city",
+        "page_id": "sg00001",
+        "status": "done",
+        "review_status": "approved",
+        "promote_requested": "true",
+    }]
+    drive = InMemoryDriveStore({("ai", "saga-city/sg00001.html"): "<p>approved</p>"})
+
+    summary = run_jobs(store, drive)
+
+    assert summary["n_total"] == 0
+    assert summary["n_promoted"] == 1
+    assert drive.files[("gold", "saga-city/sg00001.html")] == "<p>approved</p>"
 
 
 def _store_with_config():

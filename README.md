@@ -183,3 +183,57 @@ python skills/a11y-pressure-test/scripts/pressure_test.py --repeat 2
 ```
 
 このハーネスは通常の `pytest -q` と、`RUN_HTML_PAIRS=1` を付けた HTML ペア回帰を実行し、通過率から High / Medium / Low の readiness を出力します。
+
+## 15. Phase 2: Apps Script の実行 UX と通知
+
+`apps_script/` に、Phase 1 の管理スプレッドシートへバインドして使う Apps Script ソースを追加しています。Apps Script は HTML 修正を行わず、`Jobs` / `Review` / `Runs` の状態フラグ操作、通知、シート UX の整備だけを担当します。
+
+### 15.1 clasp で Apps Script を push する
+
+```bash
+npm install -g @google/clasp
+clasp login
+cp .clasp.json.example .clasp.json
+# .clasp.json の scriptId を、対象スプレッドシートに紐付いた Apps Script の ID に変更
+clasp push
+```
+
+初回 push 後、スプレッドシートを再読み込みすると `A11y` メニューが表示されます。
+
+### 15.2 メニューでできること
+
+- **選択行を実行（キュー投入）**: 選択した `Jobs` 行を `status=queued` にし、`created_at` が空なら現在時刻を書き込みます。
+- **選択行を再実行**: 選択行を `status=queued` に戻します。
+- **選択行を承認**: `review_status=approved` を設定します。`Config.auto_promote_gold=true` の場合は `promote_requested=true` も設定し、次回ランナー実行時に ai 出力を gold へコピーします。
+- **今すぐ実行（直接）**: Script Property `RUNNER_ENDPOINT` がある場合だけ `job_ids` を POST します。未設定ならフラグ方式へフォールバックします。
+- **シート整備**: `status` / `review_status` のプルダウンと、`status` の条件付き書式を冪等に設定します。
+- **通知トリガを設置**: 5 分間隔で `notifyOnStatusChange` を実行する時間主導トリガを作成します。
+
+### 15.3 Script Properties
+
+Apps Script の **Project Settings > Script Properties** に設定します。エンドポイント、トークン、Webhook はコードやリポジトリに含めません。
+
+| キー | 用途 | 必須 |
+|---|---|---|
+| `RUNNER_ENDPOINT` | 直接実行方式用の HTTP エンドポイント | 任意 |
+| `RUNNER_TOKEN` | 直接実行方式の Bearer token | `RUNNER_ENDPOINT` 側が要求する場合 |
+| `CHAT_WEBHOOK` | Google Chat Incoming Webhook URL | 任意 |
+| `NOTIFY_DEFAULT_EMAIL` | `Jobs.reviewer` が空のときの通知先 | 推奨 |
+
+`notifyOnStatusChange` は `job_id -> status` のスナップショットを Script Properties に保存し、`done` / `error` / `needs_review` へ遷移したときだけ通知します。通知先が未設定の場合は送信せずログだけ残します。
+
+### 15.4 定期実行（cron の例）
+
+既定運用はフラグ方式です。Apps Script が `status=queued` を設定し、Python ランナーを cron などで定期起動して queued 行を順次処理します。
+
+```cron
+*/10 * * * * cd /opt/claude-a11y-agent && /opt/claude-a11y-agent/.venv/bin/python -m a11y_runner run --sheet <SHEET_ID> >> /var/log/a11y-runner.log 2>&1
+```
+
+ランナーの `run` コマンドは、処理対象が 0 件でも正常終了し、JSON サマリを標準出力へ出します。`promote_requested=true` かつ `review_status=approved` の行があれば、ai 出力フォルダから gold フォルダへ同じ `site/page_id.html` パスでコピーし、`gold_output_link` を更新して `promote_requested=false` に戻します。
+
+手動で gold 昇格だけを実行したい場合は次を使えます。
+
+```bash
+python -m a11y_runner promote --sheet <SHEET_ID>
+```
