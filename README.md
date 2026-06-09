@@ -16,6 +16,10 @@ tests/test_mechanical_dom.py   lxml DOM操作（構造アサーション）
 tests/test_prompts.py          プロンプト：オフライン充填+契約／オンライン@llm
 ```
 
+## 実行手順ドキュメント
+
+このツールの初回セットアップ、通常テスト、HTMLペア回帰、Gemini / Claude 実LLM回帰、readiness 検査の実行手順は [`docs/runbook.md`](docs/runbook.md) にまとめています。
+
 ## 実行
 ```bash
 pip install -r requirements-dev.txt      # 最低限 pytest と lxml
@@ -115,6 +119,59 @@ pytest -q                                      # 通常CI: 既存の機械＋オ
 RUN_HTML_PAIRS=1 pytest -m html_pairs         # goldチェック＋ai↔goldドリフト。未配置ペアは自動スキップ
 RUN_HTML_PAIRS=1 pytest -m drift              # ai↔goldドリフト確認（差分は情報出力）
 RUN_HTML_PAIRS=1 RUN_E2E=1 pytest -m e2e      # pipeline本体が接続できる場合だけ実行
+```
+
+## Sheets / Drive 実行管理ランナー（Phase 1）
+
+非エンジニアが Google Sheets を管理画面として使い、Drive 上の HTML を処理できるように、Python ランナー `a11y_runner/` を追加しています。Sheets をジョブ管理のコントロールプレーン、Drive を入出力置き場として使います。
+
+### ランナーの前提
+
+1. Google Cloud でサービスアカウントを作成し、JSON 鍵を安全な場所に保存します。
+2. 対象の Google Sheet と Drive の入力 / ai 出力 / gold 出力フォルダを、サービスアカウントのメールアドレスへ共有します。
+3. JSON 鍵はリポジトリへ置かず、環境変数でパスだけを渡します。
+
+```bash
+cp .env.example .env
+export GOOGLE_APPLICATION_CREDENTIALS=/secure/path/to/service-account.json
+pip install -r requirements-runner.txt
+```
+
+### シート初期化
+
+空の Sheet に必要なタブとヘッダを作成します。再実行しても既存のタブや行は壊しません。
+
+```bash
+python -m a11y_runner init-sheet --sheet <SHEET_ID>
+```
+
+作成・検証されるタブは `Config`, `Sites`, `Jobs`, `Runs`, `Review`, `Metrics` です。`Config` には `llm_provider`, Drive フォルダ ID, `run_mode`, `default_site` などの既定キーが追加されます。
+
+### ジョブ確認と実行
+
+`Jobs` タブで `status=queued` の行だけを対象にします。`done` / `running` の行は冪等性のため再処理しません。再実行したい場合は、人が `status` を `queued` に戻します。
+
+```bash
+python -m a11y_runner run --sheet <SHEET_ID> --dry-run
+python -m a11y_runner run --sheet <SHEET_ID> --site saga-city --limit 10
+```
+
+ランナーは `queued` 行を `running` に更新し、Drive 入力から HTML を取得して `process_page()` を呼び出します。生成した ai HTML は Drive の ai 出力フォルダへ保存し、`Jobs.ai_output_link` にリンクを書き戻します。要確認事項がある場合は `Review` に追記し、ジョブの `status` を `needs_review` にします。
+
+### gold チェック
+
+人がレビュー済み HTML を gold フォルダに保存したあと、既存の `html_pairs` チェック資産を再利用して `Metrics` / `Review` に結果を記録できます。
+
+```bash
+python -m a11y_runner check --sheet <SHEET_ID> --site saga-city
+```
+
+### ローカル開発・テスト
+
+Sheets / Drive はユニットテストではモックしています。Google 認証情報や Sheet ID は不要です。
+
+```bash
+pytest -q tests/test_runner.py
 ```
 
 ## Codex skill: a11y-pressure-test
