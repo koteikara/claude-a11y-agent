@@ -27,6 +27,7 @@ JOBS_HEADERS = [
     "gold_output_link",
     "review_status",
     "reviewer",
+    "promote_requested",
     "error",
     "notes",
 ]

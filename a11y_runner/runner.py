@@ -73,7 +73,7 @@ def run_jobs(store: SheetStore, drive: DriveStore, *, site: str | None = None, l
 
     run_id = uuid.uuid4().hex[:12]
     started_at = utc_now()
-    summary = {"run_id": run_id, "n_total": len(jobs), "n_done": 0, "n_error": 0, "n_review": 0}
+    summary = {"run_id": run_id, "n_total": len(jobs), "n_done": 0, "n_error": 0, "n_review": 0, "n_promoted": 0}
 
     config = _config_dict(store)
     sites = _site_config(store)
@@ -93,6 +93,8 @@ def run_jobs(store: SheetStore, drive: DriveStore, *, site: str | None = None, l
                 "error": f"{type(exc).__name__}: {exc}",
             })
 
+    summary["n_promoted"] = promote_requested_gold(store, drive)
+
     store.append_rows(RUNS_TAB, [{
         "run_id": run_id,
         "started_at": started_at,
@@ -105,6 +107,45 @@ def run_jobs(store: SheetStore, drive: DriveStore, *, site: str | None = None, l
         "notes": "",
     }])
     return summary
+
+
+def promote_requested_gold(store: SheetStore, drive: DriveStore) -> int:
+    """Promote approved ai outputs to the gold Drive folder when requested.
+
+    Apps Script only raises the `promote_requested` flag. The runner owns the
+    actual ai -> gold copy so Sheets remains the source of truth without moving
+    HTML processing into Apps Script.
+    """
+
+    init_sheet(store)
+    config = _config_dict(store)
+    ai_folder = config.get("drive_output_ai_folder_id", "")
+    gold_folder = config.get("drive_output_gold_folder_id", "")
+    promoted = 0
+    for job in store.get_rows(JOBS_TAB):
+        if not _truthy(job.get("promote_requested")):
+            continue
+        if str(job.get("review_status", "")).strip() != "approved":
+            continue
+        site = job.get("site") or config.get("default_site", "")
+        page_id = job.get("page_id", "")
+        if not site or not page_id:
+            store.update_row(JOBS_TAB, job["_row_number"], {"error": "site and page_id are required for promotion"})
+            continue
+        path = f"{site}/{page_id}.html"
+        try:
+            html = drive.read_text(ai_folder, path)
+            gold_link = drive.write_text(gold_folder, path, html)
+        except Exception as exc:
+            store.update_row(JOBS_TAB, job["_row_number"], {"error": f"promotion failed: {type(exc).__name__}: {exc}"})
+            continue
+        store.update_row(JOBS_TAB, job["_row_number"], {
+            "gold_output_link": gold_link,
+            "promote_requested": "false",
+            "error": "",
+        })
+        promoted += 1
+    return promoted
 
 
 def check_gold(store: SheetStore, drive: DriveStore, *, site: str | None = None,
@@ -234,6 +275,10 @@ def _config_dict(store: SheetStore) -> dict:
 
 def _site_config(store: SheetStore) -> dict:
     return {row.get("site", ""): row for row in store.get_rows(SITES_TAB) if row.get("site")}
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _priority(row: dict) -> tuple[int, str]:

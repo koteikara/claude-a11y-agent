@@ -6,3 +6,7 @@ __pycache__/
 
 # Local credentials/config
 .env
+
+# Local clasp project binding
+.clasp.json
+apps_script/.clasp.json
