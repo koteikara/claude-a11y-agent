@@ -6,6 +6,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("bleach")
+pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from a11y_runner.drive import InMemoryDriveStore
@@ -40,6 +41,15 @@ def make_client(monkeypatch, store, drive) -> TestClient:
     app_module.app.dependency_overrides[app_module.get_sheet_store] = lambda: store
     app_module.app.dependency_overrides[app_module.get_drive_store] = lambda: drive
     return TestClient(app_module.app)
+
+
+def test_healthz_does_not_require_basic_auth(monkeypatch):
+    monkeypatch.delenv("AUTH_DISABLED_FOR_TESTS", raising=False)
+    monkeypatch.delenv("BASIC_AUTH_USERNAME", raising=False)
+    monkeypatch.delenv("BASIC_AUTH_PASSWORD", raising=False)
+    response = TestClient(app_module.app).get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_jobs_filter_and_run_updates_sheet_and_drive(monkeypatch):

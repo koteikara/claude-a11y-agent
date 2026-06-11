@@ -80,6 +80,8 @@ async def require_private_auth(request: Request, call_next):
     # Basic Auth too unless tests explicitly disable auth. Static JS/CSS assets
     # are harmless without data, but Cloud Run + IAP should protect all paths in
     # production.
+    if request.url.path == "/healthz":
+        return await call_next(request)
     if not request.url.path.startswith("/api/") and not _static_asset(request.url.path) and not _auth_disabled():
         username = os.getenv("BASIC_AUTH_USERNAME")
         password = os.getenv("BASIC_AUTH_PASSWORD")
@@ -88,6 +90,11 @@ async def require_private_auth(request: Request, call_next):
         if not _basic_header_matches(request.headers.get("authorization", ""), username, password):
             return Response("Authentication required", status_code=401, headers={"WWW-Authenticate": "Basic"})
     return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
 
 
 @app.get("/api/jobs", dependencies=[Depends(_require_auth)])
