@@ -1,239 +1,292 @@
-# a11y-regression — Claude-A11y Agent 回帰テスト雛形
+# Claude-A11y Agent 誰でも分かる利用ガイド
 
-`機械` 32関数と `機械+AI` 16プロンプトのデグレを検出するための pytest 雛形。
-事例はすべて JSONL のデータ駆動で、24事例Excelは同形式に変換して差し込むだけ。
+## 1. このツールは何？
 
-## 構成
-```
-mechanical_rules.py            機械32ルールの実装（被テスト対象）
-specs/a11y_hybrid_detect_fix.jsonl   16プロンプト雛形＋出力契約（被テスト対象）
-a11y_testkit/jsonparse.py      最外部{...}を取り出す堅牢JSONパーサ
-a11y_testkit/llm.py            LLM_PROVIDER で gemini/claude 切替＋Mock
-tests/cases/mechanical_cases.jsonl   機械の入力/期待出力ペア（シード27件）
-tests/cases/prompt_cases.jsonl       プロンプトのゴールデン事例（19件・16ルール網羅）
-tests/test_mechanical_text.py  文字列関数（equals/telfax/bool/xfail）
-tests/test_mechanical_dom.py   lxml DOM操作（構造アサーション）
-tests/test_prompts.py          プロンプト：オフライン充填+契約／オンライン@llm
-```
+Claude-A11y Agent は、市のホームページを新しい仕組みへ移すときに、ページの内容を誰でも読みやすい形へ自動で整え、最後に人が確認して承認するための道具です。ここでいうアクセシビリティとは、目の見えない人が使う読み上げソフトでも内容やリンク先が伝わるようにすること、画像の意味を文字で補うこと、表の内容を分かりやすくすることなどを指します。
 
-## 実行手順ドキュメント
+## 2. 誰のため・何ができる
 
-このツールの初回セットアップ、通常テスト、HTMLペア回帰、Gemini / Claude 実LLM回帰、readiness 検査の実行手順は [`docs/runbook.md`](docs/runbook.md) にまとめています。
+このツールは、運用担当者、レビュー担当者、品質確認担当者が、専門的な HTML の知識なしでページ移行を進めるためのものです。
 
-## 実行
-```bash
-pip install -r requirements-dev.txt      # 最低限 pytest と lxml
-pytest                                   # 機械＋オフラインプロンプト（@llmは自動スキップ）
+- ページごとの処理予定を一覧で管理できます。
+- 処理したいページをまとめて自動処理できます。
+- AI が直した下書きと元ページを見比べられます。
+- AI が迷った箇所を確認し、受け入れ・修正予定・スキップを選べます。
+- 内容を確認したら承認し、人が確認済みの最終版として残せます。
 
-# 実LLM回帰（Geminiの例）
-export LLM_PROVIDER=gemini RUN_LLM_TESTS=1 GEMINI_API_KEY=...
-pip install -r requirements-llm-gemini.txt
-pytest -m llm
+## 3. 3つの使い方（早見表）
 
-# 実LLM回帰（Claudeの例）
-export LLM_PROVIDER=claude RUN_LLM_TESTS=1 ANTHROPIC_API_KEY=...
-pip install -r requirements-llm-claude.txt
-pytest -m llm
-```
+| 使い方 | 向いている人 | できること | 主に使う場所 |
+|---|---|---|---|
+| A. スプレッドシートで管理・実行 | 一覧表で多くのページを管理したい人 | `Jobs` 行を追加し、`status` を `queued` にして処理を待つ | Google スプレッドシート |
+| B. ボタンでワンクリック実行＋通知 | スプレッドシート上のボタンだけで操作したい人 | `A11y` メニューから実行、再実行、承認、通知設定を行う | Google スプレッドシートの `A11y` メニュー |
+| C. Web管理画面 | ブラウザで見比べ、要確認、承認まで進めたい人 | 一覧、実行、old・ai・gold 比較、要確認、承認、指標確認を行う | Web管理画面 |
 
-## 2系統のテスト
-- **機械**: `func(input) == expected` を直接検証。`fix_telfax` は `(text, needs_review)` を確認。
-  `単語 広辞苑`（複数単語の区切りスペース保持）は CJK隣接ルールの既知の限界として **xfail** で明示。
-- **プロンプト**:
-  - オフライン（常時）= 雛形が全プレースホルダを埋め切るか＋出力契約JSONが堅牢パーサで読め必須キーを持つか。
-  - オンライン（`@llm`）= 実LLMを呼び、契約充足＋安定アサーション（例: `2/3`は日付でない、`☆`固有名詞は keep）。
+迷ったら、普段の確認作業には **C. Web管理画面** を使ってください。多くのページを登録する作業は **A. スプレッドシート**、手早い実行や通知設定は **B. ボタン操作** が便利です。
 
-## 24事例Excelの取り込み
-`データ移行総合マニュアル…抽出.xlsx` 形式とは別の「24件の実処理事例＋期待出力」Excelを、
-`tests/cases/mechanical_cases.jsonl` / `prompt_cases.jsonl` と同じスキーマに変換して追記する。
-列の対応例: `修正前→input` / `修正後→expected` / `ルール→rule` / 対象関数→`func`。
+## 4. はじめての準備
 
-## CI（.github/workflows/tests.yml）
-- `mechanical` ジョブ: 毎 push・PR でオフライン一式。
-- `llm` ジョブ: `workflow_dispatch`（手動）/ `schedule`（週次）でのみ。`secrets.GEMINI_API_KEY` を使用。
+利用者が自分でサーバーや認証情報を設定する必要はありません。次の準備が済んでいるか、管理者に確認してください。
 
-## HTMLペア回帰テスト（old / ai / gold）
+1. 管理者から Web管理画面の URL を受け取ります。
+2. ログインに必要な情報を受け取ります。組織のログイン画面が出る場合と、ユーザー名・パスワードを入力する Basic 認証の場合があります。
+3. 対象の Google スプレッドシートを開けることを確認します。
+4. 入力 HTML、AI 出力、承認済み出力を置く Google Drive フォルダを開けることを確認します。
+5. 開けない場所がある場合は、自分で設定を変えず、管理者に「どの URL が開けないか」を伝えてください。
 
-移行元HTMLと人が確認した期待HTMLを、実体ファイルとJSONL索引で回帰資産化するための仕組みです。
+サービスアカウント、Drive フォルダ ID、デプロイなどの技術的な初期設定は、管理者向けの [`docs/開発者向け.md`](docs/開発者向け.md) にまとめています。
 
-### 3系統の役割
+## 5. 使い方A：スプレッドシートで実行
 
-| stage | 意味 | テスト上の扱い |
+スプレッドシートは、すべての使い方に共通する管理台帳です。Web管理画面で操作した内容も、同じスプレッドシートに反映されます。
+
+### 5.1 ページを処理待ちにする
+
+（ここに画面例：`Jobs` タブで行を追加する画面）
+
+1. 管理者から共有されたスプレッドシートを開きます。
+2. 画面下のタブから `Jobs` を開きます。
+3. 新しい行に、少なくとも `site` と `page_id` を入力します。
+4. 元ファイル名が標準の `site/page_id.html` と違う場合だけ、`input_file` に入力ファイルの場所を書きます。
+5. `status` に `queued` と入力します。これは「処理待ち」という意味です。
+6. ランナーが動くと、`status` が `running` に変わります。これは「処理中」という意味です。
+7. 処理が終わると、`status` が `done`、`needs_review`、`error` のいずれかになります。
+8. AI が作った結果のリンクは `ai_output_link` に入ります。
+9. 承認済みの最終版のリンクは `gold_output_link` に入ります。
+
+### 5.2 `Jobs` タブでよく見る列
+
+| 列名 | やさしい説明 |
+|---|---|
+| `job_id` | 処理1件ごとの管理番号です。空でも、実行時に自動で入る場合があります。 |
+| `site` | 対象サイト名です。例は `saga-city` です。 |
+| `page_id` | ページを見分ける名前です。 |
+| `input_file` | 入力 HTML の場所です。空欄なら `site/page_id.html` として扱われます。 |
+| `provider` | AI の種類を指定したい場合に使います。空欄なら設定値が使われます。 |
+| `priority` | 処理の優先度です。小さい数字ほど先に処理されます。 |
+| `status` | 処理状態です。下の表を見てください。 |
+| `ai_output_link` | AI が作った下書きへのリンクです。 |
+| `gold_output_link` | 人が承認した最終版へのリンクです。 |
+| `review_status` | レビュー状態です。`pending` は確認待ち、`approved` は承認済み、`rejected` は差し戻しです。 |
+| `reviewer` | 確認担当者または通知先です。 |
+| `promote_requested` | `true` の場合、承認済みの AI 出力を次回ランナー実行時に gold へ反映します。 |
+| `error` | 失敗した理由が入ります。 |
+| `notes` | 連絡事項やメモです。 |
+
+### 5.3 `status` の意味
+
+| 状態 | 意味 | 次にすること |
 |---|---|---|
-| `old` | 移行元HTML（処理前の入力） | `baseline:"old"` を持つチェックだけが比較対象にします。 |
-| `ai` | AIを通して生成した出力（任意のスナップショット） | `ai`↔`gold` のドリフト比較にだけ使います。差分は情報出力で、失敗にはしません。 |
-| `gold` | 人が確認した期待出力（正・ゴールド） | 検証の主対象です。hardチェックは `gold` に対して失敗を検出します。 |
+| 空欄 | まだ処理対象になっていません。 | 処理したい場合は `queued` にします。 |
+| `queued` | 処理待ちです。 | ランナーが動くまで待ちます。 |
+| `running` | 処理中です。 | しばらく待ちます。 |
+| `done` | 自動処理が完了しました。 | 結果を確認し、必要なら承認します。 |
+| `needs_review` | AI が人に確認してほしい箇所を見つけました。 | Web管理画面または `Review` タブで確認します。 |
+| `error` | 処理に失敗しました。 | `error` 列を読み、分からない場合は管理者に連絡します。 |
 
-### ディレクトリ規約と追加手順
+## 6. 使い方B：ボタン（Apps Script）
 
-HTML fixture は次の規約で配置します。
+スプレッドシートには `A11y` というメニューを追加できます。このメニューは、HTML の修正そのものではなく、行の状態変更、通知、シートの見やすさの整備を行います。
 
-```text
-tests/fixtures/html/{site}/{stage}/{page_id}.html
-```
+（ここに画面例：スプレッドシート上部の `A11y` メニュー）
 
-- `stage` は `old` / `ai` / `gold` のいずれかです。
-- `old` と `gold` は必須で、厳密に `{page_id}.html` を置きます。
-- `ai` は任意です。生成日などの接尾辞を許容し、`{page_id}.html` または `{page_id}_0820.html` のように `_` 区切りで置けます。
-- 空ディレクトリを保持するため、各 `old` / `ai` / `gold` に `.gitkeep` を置いています。
+### 6.1 `A11y` メニューでできること
 
-ペアを追加するときは、`old` と `gold` のHTMLを置き、`tests/cases/html_pairs.jsonl` に1行追加するだけです。`ai` は任意で、存在する場合だけドリフト比較が走ります。HTMLペア回帰は大きなfixture更新で通常CIを止めないよう、`RUN_HTML_PAIRS=1` を付けたときだけ実行します。
+| メニュー名 | 押すとどうなるか |
+|---|---|
+| `選択行を実行（キュー投入）` | 選択中の `Jobs` 行を `status=queued` にします。`created_at` が空なら現在時刻も入ります。 |
+| `選択行を再実行` | 選択中の行を `status=queued` に戻し、`error` を空にします。 |
+| `選択行を承認` | 選択中の行の `review_status` を `approved` にします。`Config` の `auto_promote_gold` が `true` の場合は、`promote_requested=true` も設定します。 |
+| `今すぐ実行（直接）` | 管理者が `RUNNER_ENDPOINT` を設定している場合だけ、その場で実行リクエストを送ります。未設定の場合は `queued` にして、定期実行を待つ形に切り替わります。 |
+| `シート整備` | `status` と `review_status` のプルダウン、`status` の色分けを設定します。 |
+| `通知トリガを設置` | 5分ごとに状態変化を確認する通知処理を設定します。 |
 
-索引1行の主なキーは `id`, `site`, `page_id`, `has_ai`, `body_xpath`, `exercises`, `checks` です。`body_xpath` を省略した場合は文書全体を対象にします。
+### 6.2 通知について
 
-### check カタログ要約
+1. ジョブの状態が `done`、`error`、`needs_review` に変わると通知対象になります。
+2. `Jobs.reviewer` にメールアドレスがあれば、その宛先へメールが送られます。
+3. `Jobs.reviewer` が空でも、管理者が `NOTIFY_DEFAULT_EMAIL` を設定していれば、その宛先へ送られます。
+4. 管理者が `CHAT_WEBHOOK` を設定していれば、Google Chat にも通知されます。
+5. 通知先が未設定の場合、通知は送られず、ログだけが残ります。
 
-| 分類 | check | 概要 |
+## 7. 使い方C：Web管理画面
+
+Web管理画面は、ブラウザだけで「一覧を見る」「実行する」「old・ai・gold を見比べる」「要確認を処理する」「承認する」「指標を見る」ための画面です。
+
+### 7.1 画面を開く・ログインする
+
+（ここに画面例：Web管理画面のログイン画面）
+
+1. 管理者から共有された Web管理画面の URL を開きます。
+2. 組織のログイン画面が出た場合は、普段使っているアカウントでログインします。
+3. ユーザー名とパスワードの小さな入力画面が出た場合は、管理者から受け取った Basic 認証のユーザー名とパスワードを入力します。
+4. ログインに成功すると、画面上部に `Claude A11y 管理画面` と表示されます。
+5. ログインできない場合は、URL、表示されたエラーメッセージ、ログイン方法を管理者に伝えてください。
+
+この Web管理画面は、公開用のホームページではありません。市のページ内容や Google Drive、スプレッドシートを書き換えられるため、管理者は組織の認証または Basic 認証を必ず設定します。
+
+### 7.2 ジョブ一覧を見る
+
+（ここに画面例：ジョブ一覧画面）
+
+1. 画面上部の `ジョブ一覧` を押します。
+2. 一覧には、`ジョブ`、`サイト`、`ページ`、`状態`、`レビュー`、`操作` が表示されます。
+3. `サイト` の入力欄に `saga-city` のようなサイト名を入れると、そのサイトだけに絞り込めます。
+4. `状態` の入力欄に `queued`、`running`、`done`、`needs_review`、`error` のいずれかを入れると、その状態だけに絞り込めます。
+5. `更新` を押すと、最新の一覧を読み込みます。
+6. 画面は約5秒ごとにも自動で更新されます。
+
+### 7.3 状態の色とラベルを見る
+
+| 表示 | 色の目安 | 意味 |
 |---|---|---|
-| 機械判定（hard） | `no_tag` | `font`, `u`, `s`, `strike`, `i`, `center`, `graphic`, `html`, `body`, `head` などの禁止タグが無いこと。 |
-| 機械判定（hard） | `no_anchor_text` | `<a>` テキストに「こちら」「ここ」「詳細」などの指示語を含まないこと。 |
-| 機械判定（hard） | `anchor_href_present` | 全 `<a>` が非空の `href` を持つこと。 |
-| 機械判定（hard） | `href_no_pattern` | `<a href>` が指定正規表現（例: `[?&]smf=`）に一致しないこと。 |
-| 機械判定（hard） | `no_short_weekday` | `（月）` のような短縮曜日表記が無いこと。 |
-| 機械判定（hard） | `alt_present` | 全 `<img>` が `alt` 属性を持つこと（空altは可）。 |
-| 機械判定（hard） | `no_id` | 共通パーツ由来の `id` が無いこと。 |
-| 機械判定（hard） | `no_layout_table` | `<th>` を持たず、`border="0"` または `class` に `nb` / `layout` を含む表が無いこと。 |
-| 機械判定（hard） | `no_consecutive_br` | 連続 `<br>` が無いこと。 |
-| 機械判定（hard） | `tag_count_not_decreased` | `baseline:"old"` と比較し、指定タグ数が減っていないこと。既定では `iframe` 用です。 |
-| 助言判定（advisory） | `no_attr` | `align`, `bgcolor`, `cellpadding`, `cellspacing`, `valign`, `nowrap` などのレガシー表示属性を警告します。 |
-| 助言判定（advisory） | `text_coverage` | `gold` の可視テキスト長 ÷ `old` の可視テキスト長が指定比率以上かを警告します。 |
-| 実装あり・既定不採用 | `attr_whitelist` | 全属性が許可リスト内かを確認します。このCMSの `gold` は `class` 等を保持するため既定索引では使いません。 |
-| 非機械 | alt内容の公式充足 | 「主題＋様子＋付加情報＋種類」の充足はLLMまたは人手レビューで担保します。 |
-| 非機械 | 年号の文脈補完 | 文脈推測が必要な年号補完はLLMまたは人手レビューで担保します。 |
+| `queued` | 灰色 | 処理待ちです。 |
+| `running` | 青色 | 処理中です。 |
+| `done` | 緑色 | 処理が完了しました。 |
+| `needs_review` | 黄色 | 人の確認が必要です。 |
+| `error` | 赤色 | 失敗しました。 |
+| `unknown` | 灰色 | 状態が空、または想定外です。 |
 
-未知の `check.type` が索引に現れた場合は、将来拡張に備えて失敗ではなくスキップと警告にします。
+### 7.4 ジョブを実行する
 
-### 比較前処理（CMS自動付与属性の除去）
+（ここに画面例：一覧の `実行` ボタン）
 
-`gold` は対象CMSがHTML出力した結果であり、`class` / `id` / `style` / `role` / `aria-*` / `data-*` などは人間の意図ではなくCMSが自動付与した副産物を含みます。そのため `ai`↔`gold` ドリフト比較と `@e2e` 比較では、比較時のメモリ上コピーから次の属性を剥がしてから正規化します。
+1. ジョブ一覧で処理したい行を探します。
+2. その行の `実行` ボタンを押します。
+3. 画面は対象ジョブを `queued` に戻し、バックグラウンドで処理を始めます。
+4. すでに `running` のジョブを実行しようとすると、二重実行を避けるためエラーになります。
+5. しばらく待ち、`状態` が `done`、`needs_review`、`error` のいずれかに変わるまで確認します。
 
-- 除去する属性: `class`, `style`, `id`, `role`, `tabindex`, `target`, `width`, `height`, `aria-*`, `data-*`, `border`, `cellpadding`, `cellspacing`, `allow`, `allowfullscreen`, `frameborder`, `referrerpolicy`, `scrolling`
-- 残す意味属性: `href`, `src`, `alt`, `scope`, `colspan`, `rowspan`, `summary`, `title`, `lang`
+### 7.5 ジョブ詳細を開く
 
-`gold` ファイル自体は加工せず、`strip_cms_attrs()` を適用したコピーだけを比較に使います。
+（ここに画面例：ジョブ詳細画面）
 
-### 実行方法
+1. ジョブ一覧で確認したい行を探します。
+2. その行の `詳細` ボタンを押します。
+3. 詳細画面に、対象の `site/page_id` と現在の状態が表示されます。
+4. 一覧へ戻る場合は `← 一覧へ` を押します。
 
-```bash
-pytest -q                                      # 通常CI: 既存の機械＋オフラインプロンプト（HTMLペアは自動スキップ）
-RUN_HTML_PAIRS=1 pytest -m html_pairs         # goldチェック＋ai↔goldドリフト。未配置ペアは自動スキップ
-RUN_HTML_PAIRS=1 pytest -m drift              # ai↔goldドリフト確認（差分は情報出力）
-RUN_HTML_PAIRS=1 RUN_E2E=1 pytest -m e2e      # pipeline本体が接続できる場合だけ実行
-```
+### 7.6 old・ai・gold を並べて見比べる
 
-## Sheets / Drive 実行管理ランナー（Phase 1）
+（ここに画面例：old・ai・gold の3画面比較）
 
-非エンジニアが Google Sheets を管理画面として使い、Drive 上の HTML を処理できるように、Python ランナー `a11y_runner/` を追加しています。Sheets をジョブ管理のコントロールプレーン、Drive を入出力置き場として使います。
+詳細画面には、3つの表示枠があります。
 
-### ランナーの前提
-
-1. Google Cloud でサービスアカウントを作成し、JSON 鍵を安全な場所に保存します。
-2. 対象の Google Sheet と Drive の入力 / ai 出力 / gold 出力フォルダを、サービスアカウントのメールアドレスへ共有します。
-3. JSON 鍵はリポジトリへ置かず、環境変数でパスだけを渡します。
-
-```bash
-cp .env.example .env
-export GOOGLE_APPLICATION_CREDENTIALS=/secure/path/to/service-account.json
-pip install -r requirements-runner.txt
-```
-
-### シート初期化
-
-空の Sheet に必要なタブとヘッダを作成します。再実行しても既存のタブや行は壊しません。
-
-```bash
-python -m a11y_runner init-sheet --sheet <SHEET_ID>
-```
-
-作成・検証されるタブは `Config`, `Sites`, `Jobs`, `Runs`, `Review`, `Metrics` です。`Config` には `llm_provider`, Drive フォルダ ID, `run_mode`, `default_site` などの既定キーが追加されます。
-
-### ジョブ確認と実行
-
-`Jobs` タブで `status=queued` の行だけを対象にします。`done` / `running` の行は冪等性のため再処理しません。再実行したい場合は、人が `status` を `queued` に戻します。
-
-```bash
-python -m a11y_runner run --sheet <SHEET_ID> --dry-run
-python -m a11y_runner run --sheet <SHEET_ID> --site saga-city --limit 10
-```
-
-ランナーは `queued` 行を `running` に更新し、Drive 入力から HTML を取得して `process_page()` を呼び出します。生成した ai HTML は Drive の ai 出力フォルダへ保存し、`Jobs.ai_output_link` にリンクを書き戻します。要確認事項がある場合は `Review` に追記し、ジョブの `status` を `needs_review` にします。
-
-### gold チェック
-
-人がレビュー済み HTML を gold フォルダに保存したあと、既存の `html_pairs` チェック資産を再利用して `Metrics` / `Review` に結果を記録できます。
-
-```bash
-python -m a11y_runner check --sheet <SHEET_ID> --site saga-city
-```
-
-### ローカル開発・テスト
-
-Sheets / Drive はユニットテストではモックしています。Google 認証情報や Sheet ID は不要です。
-
-```bash
-pytest -q tests/test_runner.py
-```
-
-## Codex skill: a11y-pressure-test
-
-このリポジトリ内のアクセシビリティ回帰修正について、決定的なオフライン検査を繰り返し実行して実現度を測る Codex skill を `skills/a11y-pressure-test/` に追加しています。
-
-```bash
-python skills/a11y-pressure-test/scripts/pressure_test.py --repeat 2
-```
-
-このハーネスは通常の `pytest -q` と、`RUN_HTML_PAIRS=1` を付けた HTML ペア回帰を実行し、通過率から High / Medium / Low の readiness を出力します。
-
-## 15. Phase 2: Apps Script の実行 UX と通知
-
-`apps_script/` に、Phase 1 の管理スプレッドシートへバインドして使う Apps Script ソースを追加しています。Apps Script は HTML 修正を行わず、`Jobs` / `Review` / `Runs` の状態フラグ操作、通知、シート UX の整備だけを担当します。
-
-### 15.1 clasp で Apps Script を push する
-
-```bash
-npm install -g @google/clasp
-clasp login
-cp .clasp.json.example .clasp.json
-# .clasp.json の scriptId を、対象スプレッドシートに紐付いた Apps Script の ID に変更
-clasp push
-```
-
-初回 push 後、スプレッドシートを再読み込みすると `A11y` メニューが表示されます。
-
-### 15.2 メニューでできること
-
-- **選択行を実行（キュー投入）**: 選択した `Jobs` 行を `status=queued` にし、`created_at` が空なら現在時刻を書き込みます。
-- **選択行を再実行**: 選択行を `status=queued` に戻します。
-- **選択行を承認**: `review_status=approved` を設定します。`Config.auto_promote_gold=true` の場合は `promote_requested=true` も設定し、次回ランナー実行時に ai 出力を gold へコピーします。
-- **今すぐ実行（直接）**: Script Property `RUNNER_ENDPOINT` がある場合だけ `job_ids` を POST します。未設定ならフラグ方式へフォールバックします。
-- **シート整備**: `status` / `review_status` のプルダウンと、`status` の条件付き書式を冪等に設定します。
-- **通知トリガを設置**: 5 分間隔で `notifyOnStatusChange` を実行する時間主導トリガを作成します。
-
-### 15.3 Script Properties
-
-Apps Script の **Project Settings > Script Properties** に設定します。エンドポイント、トークン、Webhook はコードやリポジトリに含めません。
-
-| キー | 用途 | 必須 |
+| 表示 | たとえ | 意味 |
 |---|---|---|
-| `RUNNER_ENDPOINT` | 直接実行方式用の HTTP エンドポイント | 任意 |
-| `RUNNER_TOKEN` | 直接実行方式の Bearer token | `RUNNER_ENDPOINT` 側が要求する場合 |
-| `CHAT_WEBHOOK` | Google Chat Incoming Webhook URL | 任意 |
-| `NOTIFY_DEFAULT_EMAIL` | `Jobs.reviewer` が空のときの通知先 | 推奨 |
+| `old（元ページ）` | 材料 | 移行前の元 HTML です。 |
+| `ai（AI下書き）` | 下ごしらえ | AI がアクセシビリティ対応を入れた下書きです。 |
+| `gold（承認済み）` | 仕上げ | 人が確認し、最終版として残した HTML です。 |
 
-`notifyOnStatusChange` は `job_id -> status` のスナップショットを Script Properties に保存し、`done` / `error` / `needs_review` へ遷移したときだけ通知します。通知先が未設定の場合は送信せずログだけ残します。
+1. 左から `old（元ページ）`、`ai（AI下書き）`、`gold（承認済み）` を見ます。
+2. 見出し、本文、リンク、画像説明、表が自然に読めるか確認します。
+3. `gold（承認済み）` がまだ無い場合、枠が空または読み込みエラーになることがあります。その場合は、まず `ai（AI下書き）` を確認します。
+4. 画像や表など、読み上げソフトで伝わりにくい箇所を重点的に見ます。
 
-### 15.4 定期実行（cron の例）
+### 7.7 差分パネルを読む
 
-既定運用はフラグ方式です。Apps Script が `status=queued` を設定し、Python ランナーを cron などで定期起動して queued 行を順次処理します。
+（ここに画面例：差分パネル）
 
-```cron
-*/10 * * * * cd /opt/claude-a11y-agent && /opt/claude-a11y-agent/.venv/bin/python -m a11y_runner run --sheet <SHEET_ID> >> /var/log/a11y-runner.log 2>&1
-```
+詳細画面の `差分` では、次の2種類の差分を確認できます。
 
-ランナーの `run` コマンドは、処理対象が 0 件でも正常終了し、JSON サマリを標準出力へ出します。`promote_requested=true` かつ `review_status=approved` の行があれば、ai 出力フォルダから gold フォルダへ同じ `site/page_id.html` パスでコピーし、`gold_output_link` を更新して `promote_requested=false` に戻します。
+- `old → ai`: 元ページから AI 下書きで変わったところです。
+- `ai → gold`: AI 下書きから承認済み最終版で変わったところです。
 
-手動で gold 昇格だけを実行したい場合は次を使えます。
+差分では、CMS が自動で付ける飾りのような情報をできるだけ除き、意味のある違いを中心に表示します。
 
-```bash
-python -m a11y_runner promote --sheet <SHEET_ID>
-```
+| 表示 | 意味 |
+|---|---|
+| `追加` | 後の版で増えた内容です。 |
+| `削除` | 後の版で無くなった内容です。 |
+| `変更` | 内容または構造が変わった可能性がある行です。 |
+
+### 7.8 要確認を処理する
+
+（ここに画面例：要確認リスト）
+
+1. 詳細画面の `要確認` を見ます。
+2. 各項目には、ルール番号、メッセージ、場所、提案が表示されます。
+3. 内容が問題なく、そのままでよい場合は `受け入れ` を押します。
+4. 内容を後で修正する、または修正が必要だと判断した場合は `修正` を押します。
+5. 今回は対応しない、または確認対象から外してよい場合は `スキップ` を押します。
+6. 押した内容は `Review` タブの `decision` に保存されます。
+
+`修正` ボタンは、現時点では「修正が必要と判断した」という記録です。画面上で HTML を直接編集する機能ではありません。必要な修正は、運用ルールに従って gold 側の内容へ反映してください。
+
+### 7.9 承認する
+
+（ここに画面例：`承認（gold確定）` ボタン）
+
+1. `old（元ページ）`、`ai（AI下書き）`、差分、要確認を見ます。
+2. 最終版として問題ないと判断したら、`承認（gold確定）` を押します。
+3. Web管理画面は、AI 下書きの HTML を gold フォルダへ保存します。
+4. `Jobs` 行の `review_status` は `approved` になります。
+5. `gold_output_link` に承認済みファイルへのリンクが入ります。
+6. `promote_requested` は `false` に戻ります。
+7. スプレッドシートにも同じ結果が反映されます。つまり、Web管理画面とスプレッドシートで状態は1つです。
+
+### 7.10 指標を見る
+
+（ここに画面例：指標画面）
+
+1. 画面上部の `指標` を押します。
+2. `ジョブ数` で登録済みジョブの総数を確認します。
+3. `未対応の要確認` で、まだ判断されていない要確認の数を確認します。
+4. `通過チェック` で、確認に通った項目数を見ます。
+5. `失敗チェック` で、確認に失敗した項目数を見ます。
+6. `助言件数` で、必ず失敗ではないものの確認したほうがよい項目数を見ます。
+7. 棒グラフでは、`status` ごとのジョブ数を確認できます。
+
+## 8. old・ai・gold ってなに？
+
+ページ移行は、料理にたとえると分かりやすくなります。
+
+- `old` は **材料** です。移行前のページそのものです。
+- `ai` は **下ごしらえ** です。AI が「こちら」だけのリンク文を分かりやすくしたり、画像の説明を補ったり、読み上げソフトで伝わりやすい形へ直した下書きです。
+- `gold` は **仕上げ** です。人が内容を確認し、最終版として承認したものです。
+
+アクセシビリティ対応では、見た目だけでなく、読み上げソフトに伝わる情報が大切です。たとえば、リンク文が「こちら」だけだと、読み上げソフトの利用者にはリンク先が分かりません。「申請書をダウンロードする」のように、リンクだけを読んでも意味が分かる表現にする必要があります。
+
+## 9. 用語集へのリンク
+
+よく出てくる言葉は [`docs/用語集.md`](docs/用語集.md) にまとめています。`queued`、`needs_review`、`old`、`ai`、`gold` など、画面に出る英字の意味も確認できます。
+
+## 10. 困ったとき（FAQ）
+
+### 10.1 `error` になった
+
+1. `Jobs` タブまたは Web管理画面で `error` の内容を確認します。
+2. 入力ファイルが Drive にあるか確認します。
+3. `site` と `page_id` が空でないか確認します。
+4. 自分で判断できない場合は、`job_id`、`site`、`page_id`、`error` の内容を管理者へ送ってください。
+
+### 10.2 `needs_review` のままになる
+
+`needs_review` は失敗ではありません。AI が人に確認してほしい箇所を見つけた状態です。
+
+1. Web管理画面で対象ジョブの `詳細` を開きます。
+2. `要確認` の各項目を確認します。
+3. `受け入れ`、`修正`、`スキップ` のいずれかを選びます。
+4. 最終版としてよければ `承認（gold確定）` を押します。
+
+### 10.3 結果リンクが開けない
+
+1. `ai_output_link` または `gold_output_link` が空でないか確認します。
+2. Google Drive の権限があるか確認します。
+3. 同じチームの他の人も開けない場合は、Drive フォルダの共有設定が不足している可能性があります。
+4. 管理者に、開けないリンクと表示されたエラーを伝えてください。
+
+### 10.4 `実行` を押してもすぐ終わらない
+
+ページの処理には時間がかかる場合があります。画面は約5秒ごとに自動更新されます。長時間 `running` のままの場合は、管理者に `job_id` を伝えて確認を依頼してください。
+
+### 10.5 ログインできない
+
+1. URL が正しいか確認します。
+2. 組織アカウントでログインしているか確認します。
+3. Basic 認証の場合は、ユーザー名とパスワードの入力間違いがないか確認します。
+4. それでも入れない場合は、表示されたエラーと時刻を管理者に伝えてください。
+
+## 11. 管理者・開発者の方へ
+
+初期設定、CLI コマンド、Apps Script の設置、Web管理画面の起動・認証・デプロイ、テスト、CI、既存の回帰テスト資産については [`docs/開発者向け.md`](docs/開発者向け.md) を参照してください。

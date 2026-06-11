@@ -1,52 +1,51 @@
-# Apps Script control-plane UX
+# Apps Script 操作メニュー
 
-This directory contains the container-bound Apps Script source for the Phase 2 Sheets UX.
-Apps Script only changes job flags, installs UX helpers, and sends notifications; the Python runner remains responsible for HTML processing.
+このディレクトリには、第2段階のスプレッドシート操作用 Apps Script ソースがあります。Apps Script はジョブの状態フラグ変更、シート整備、通知だけを担当します。HTML の処理は Python ランナーが担当します。
 
-## Files
+## ファイル
 
-- `appsscript.json`: manifest with minimal scopes and `Asia/Tokyo` timezone.
-- `Code.gs`: custom menu and selected-row actions.
-- `Setup.gs`: data validation, conditional formatting, and trigger installation.
-- `Notify.gs`: status transition email / Google Chat notifications.
-- `../.clasp.json.example`: template for local clasp configuration from the repository root. (`apps_script/.clasp.json.example` is also provided for users who run clasp from this directory.)
+- `appsscript.json`: 最小限の権限と `Asia/Tokyo` タイムゾーンを持つマニフェストです。
+- `Code.gs`: カスタムメニューと選択行への操作です。
+- `Setup.gs`: 入力規則、条件付き書式、トリガ設置です。
+- `Notify.gs`: 状態変化時のメール通知と Google Chat 通知です。
+- `../.clasp.json.example`: リポジトリ直下から clasp を使う場合の設定テンプレートです。`apps_script/.clasp.json.example` も、このディレクトリから clasp を実行する人向けに用意しています。
 
-## Push with clasp
+## clasp で反映する
 
-1. Install and authenticate clasp.
+1. clasp をインストールし、認証します。
 
    ```bash
    npm install -g @google/clasp
    clasp login
    ```
 
-2. Open the Phase 1 control spreadsheet, create or open its bound Apps Script project, and copy the script ID from **Project Settings**.
-3. Create `.clasp.json` in the repository root from the example and set `scriptId`.
+2. 第1段階の管理スプレッドシートを開き、紐付いた Apps Script プロジェクトを作成または開いて、プロジェクト設定からスクリプト ID をコピーします。
+3. リポジトリ直下で `.clasp.json` を作り、`scriptId` を設定します。
 
    ```bash
    cp .clasp.json.example .clasp.json
    ```
 
-4. Push the source.
+4. ソースを反映します。
 
    ```bash
    clasp push
    ```
 
-## Script Properties
+## スクリプトプロパティ
 
-Set these in Apps Script **Project Settings > Script Properties**. Do not commit secrets.
+Apps Script のプロジェクト設定にあるスクリプトプロパティへ設定します。秘密情報をコミットしないでください。
 
-| Key | Purpose | Required |
+| キー | 用途 | 必須 |
 |---|---|---|
-| `RUNNER_ENDPOINT` | Optional direct-run HTTP endpoint for `runSelectedNow` | No |
-| `RUNNER_TOKEN` | Bearer token for the direct-run endpoint | Required when endpoint requires auth |
-| `CHAT_WEBHOOK` | Google Chat Incoming Webhook URL | No |
-| `NOTIFY_DEFAULT_EMAIL` | Fallback notification recipient when `Jobs.reviewer` is blank | Recommended |
+| `RUNNER_ENDPOINT` | `runSelectedNow` 用の任意の直接実行 HTTP エンドポイント | 任意 |
+| `RUNNER_TOKEN` | 直接実行エンドポイント用の Bearer token | エンドポイントが認証を要求する場合 |
+| `CHAT_WEBHOOK` | Google Chat Incoming Webhook URL | 任意 |
+| `NOTIFY_DEFAULT_EMAIL` | `Jobs.reviewer` が空のときの通知先 | 推奨 |
 
-## First-time setup
+## 初回設定
 
-1. Reload the spreadsheet and confirm the `A11y` menu appears.
-2. Run **A11y > シート整備** to apply dropdowns and conditional formatting.
-3. Run **A11y > 通知トリガを設置** to install the 5-minute `notifyOnStatusChange` trigger.
-4. Use **選択行を実行（キュー投入）** for the default flag-based flow. Use **今すぐ実行（直接）** only when `RUNNER_ENDPOINT` is configured.
+1. スプレッドシートを再読み込みし、`A11y` メニューが表示されることを確認します。
+2. `A11y > シート整備` を実行し、プルダウンと条件付き書式を適用します。
+3. `A11y > 通知トリガを設置` を実行し、5分間隔の `notifyOnStatusChange` トリガを設置します。
+4. 通常のフラグ方式では `選択行を実行（キュー投入）` を使います。`今すぐ実行（直接）` は `RUNNER_ENDPOINT` が設定済みの場合だけ使います。
