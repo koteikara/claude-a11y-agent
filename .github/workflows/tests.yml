@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "0 18 * * 0"    # 毎週日曜 03:00 JST にLLM回帰
 
+env:
+  # GitHub-hosted runners start moving JavaScript actions from Node.js 20 to 24
+  # on 2026-06-16. Opt in explicitly so CI does not depend on the old runtime.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # 機械32関数＋プロンプト雛形/契約のオフライン検証（毎push・PR）
   mechanical:
@@ -16,9 +21,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest lxml
+      - name: Python依存関係をインストール
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -r requirements-runner.txt
       - name: 機械＋オフラインプロンプトテスト
-        run: pytest -q          # @llm は RUN_LLM_TESTS 未設定で自動スキップ
+        run: pytest -q tests          # @llm は RUN_LLM_TESTS 未設定で自動スキップ
 
   # 実LLMによるプロンプト回帰（手動 or スケジュールのみ）
   llm:
@@ -33,6 +41,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest lxml google-generativeai
+      - name: Python依存関係をインストール
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -r requirements-runner.txt -r requirements-llm-gemini.txt
       - name: 実LLMプロンプト回帰
         run: pytest -q -m llm
