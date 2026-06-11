@@ -28,14 +28,14 @@
 2. プラットフォーム上どうしても必要な場合を除き、広いプロジェクト権限は付けません。
 3. 対象 Google スプレッドシートを、サービスアカウントのメールアドレスへ編集者として共有します。
 4. 入力、AI 出力、gold 出力の Drive フォルダも同じサービスアカウントへ共有します。
-5. 認証情報は Application Default Credentials、または Secret Manager でマウントした `GOOGLE_APPLICATION_CREDENTIALS` ファイルで渡します。
+5. Cloud Run では実行サービスアカウントの Application Default Credentials を使います。`GOOGLE_APPLICATION_CREDENTIALS` やサービスアカウント JSON 鍵ファイルは使いません。ローカル開発では `gcloud auth application-default login` を使います。
 
 ## 環境変数
 
 ローカル開発では `web/.env.example` をコピーして使えます。本番で主に使う変数は次のとおりです。
 
 - `GOOGLE_SHEET_ID` または `SHEET_ID`: 対象スプレッドシートの ID。
-- `GOOGLE_APPLICATION_CREDENTIALS`: Cloud Run のサービスアカウントを Application Default Credentials として使える場合は省略できます。
+- `GOOGLE_APPLICATION_CREDENTIALS`: Cloud Run では設定しません。ローカルで JSON 鍵を使う例外時だけ、リポジトリ外のファイルパスを指定します。
 - `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD`: Identity-Aware Proxy などを使わず Basic 認証にする場合だけ設定します。
 - `PORT`: Cloud Run では自動設定されます。
 
@@ -77,12 +77,10 @@ docker run --rm -p 8080:8080 \
   -e GOOGLE_SHEET_ID=... \
   -e BASIC_AUTH_USERNAME=admin \
   -e BASIC_AUTH_PASSWORD=change-me \
-  -v "$GOOGLE_APPLICATION_CREDENTIALS:/secrets/service-account.json:ro" \
-  -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json \
   claude-a11y-admin
 ```
 
-Cloud Run デプロイ例:
+Cloud Run デプロイ例（詳細は [`docs/deploy-cloud-run.md`](../docs/deploy-cloud-run.md) を参照）:
 
 ```bash
 gcloud run deploy claude-a11y-admin \
@@ -90,6 +88,7 @@ gcloud run deploy claude-a11y-admin \
   --region asia-northeast1 \
   --service-account claude-a11y-admin@PROJECT_ID.iam.gserviceaccount.com \
   --set-env-vars GOOGLE_SHEET_ID=YOUR_SHEET_ID \
+  --set-secrets BASIC_AUTH_PASSWORD=claude-a11y-basic-auth-password:latest \
   --no-allow-unauthenticated
 ```
 
