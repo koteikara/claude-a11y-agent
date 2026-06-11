@@ -14,6 +14,8 @@ from typing import Protocol
 
 from .schema import TAB_HEADERS
 
+SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
 
 class SheetStore(Protocol):
     def ensure_tab(self, tab: str, headers: list[str]) -> None: ...
@@ -52,7 +54,7 @@ class InMemorySheetStore:
 
 
 class GspreadSheetStore:
-    """Google Sheets adapter backed by gspread and service-account auth."""
+    """Google Sheets adapter backed by gspread and Google ADC/service-account auth."""
 
     def __init__(self, sheet_id: str):
         if importlib.util.find_spec("gspread") is None:  # pragma: no cover - depends on optional package
@@ -61,9 +63,14 @@ class GspreadSheetStore:
                 "`pip install -r requirements-runner.txt`."
             )
         import gspread
+        import google.auth
 
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        client = gspread.service_account(filename=credentials_path) if credentials_path else gspread.service_account()
+        if credentials_path:
+            client = gspread.service_account(filename=credentials_path)
+        else:
+            credentials, _ = google.auth.default(scopes=SHEETS_SCOPES)
+            client = gspread.authorize(credentials)
         self._spreadsheet = client.open_by_key(sheet_id)
 
     def ensure_tab(self, tab: str, headers: list[str]) -> None:
