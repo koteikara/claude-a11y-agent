@@ -1,53 +1,53 @@
-# Web Admin MVP
+# Web管理画面
 
-Thin browser admin for the Phase 1 Sheets/Drive accessibility runner. The Google Sheet remains the single source of truth; this UI only reads and writes the existing `Jobs`, `Review`, `Runs`, and `Metrics` tabs and reuses `a11y_runner` / `process_page` for execution.
+このディレクトリは、スプレッドシートと Drive を正として使うアクセシビリティ管理画面です。Google スプレッドシートが唯一の管理台帳であり、この画面は既存の `Jobs`、`Review`、`Runs`、`Metrics` タブを読み書きし、実行時は `a11y_runner` と `process_page` を再利用します。
 
-## Features
+## 主な機能
 
-- Job list filtered by `site` and `status`.
-- Job creation and guarded execution through the shared runner engine.
-- Sanitized `old` / `ai` / `gold` HTML previews in sandboxed iframes.
-- CMS-noise-stripped structural diff using the shared `strip_cms_attrs` normalization helpers.
-- Review decisions (`accept`, `edit`, `skip`), approval, gold promotion, and metrics summaries.
+- `site` と `status` で絞り込めるジョブ一覧。
+- ジョブ作成と、共有ランナーを使った保護付き実行。
+- `old`、`ai`、`gold` の HTML プレビュー。
+- CMS 由来のノイズを取り除いた構造差分。
+- 要確認の判断（`accept`、`edit`、`skip`）、承認、gold 反映、指標サマリ。
 
-## Security model
+## セキュリティ方針
 
-Do **not** publish this service directly. It renders municipality HTML and can write to Drive/Sheets.
+このサービスを直接公開しないでください。自治体の HTML を表示し、Drive とスプレッドシートへ書き込めるためです。
 
-Recommended deployment:
+推奨する公開方法は次のとおりです。
 
-1. Deploy to Cloud Run with ingress restricted as appropriate for your organization.
-2. Put Cloud Run behind Identity-Aware Proxy (IAP) and restrict access to your Google Workspace group/domain.
-3. Use a service account that has access only to the target Sheet and Drive folders.
+1. Cloud Run へデプロイし、組織の方針に合わせてアクセス制限を設定します。
+2. Cloud Run を Identity-Aware Proxy など組織の認証で保護し、対象の Google Workspace グループまたはドメインだけに許可します。
+3. サービスアカウントには、対象スプレッドシートと Drive フォルダだけへの権限を付けます。
 
-MVP fallback for local/private deployments is HTTP Basic Auth. Set both `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`. The API returns `503` if neither IAP/OAuth nor Basic Auth is configured. `AUTH_DISABLED_FOR_TESTS=true` is only for unit tests.
+ローカルまたは限定公開向けの代替として HTTP Basic 認証を使えます。`BASIC_AUTH_USERNAME` と `BASIC_AUTH_PASSWORD` を両方設定してください。認証設定がない場合、API は `503` を返します。`AUTH_DISABLED_FOR_TESTS=true` はユニットテスト専用です。
 
-## Service account setup
+## サービスアカウント設定
 
-1. Create a Google Cloud service account.
-2. Grant the service account no broad project role unless your platform requires it.
-3. Share the target Google Sheet with the service account email as editor.
-4. Share the input, ai output, and gold output Drive folders with the same service account.
-5. Provide credentials through Application Default Credentials or a Secret Manager-mounted `GOOGLE_APPLICATION_CREDENTIALS` file.
+1. Google Cloud のサービスアカウントを作成します。
+2. プラットフォーム上どうしても必要な場合を除き、広いプロジェクト権限は付けません。
+3. 対象 Google スプレッドシートを、サービスアカウントのメールアドレスへ編集者として共有します。
+4. 入力、AI 出力、gold 出力の Drive フォルダも同じサービスアカウントへ共有します。
+5. 認証情報は Application Default Credentials、または Secret Manager でマウントした `GOOGLE_APPLICATION_CREDENTIALS` ファイルで渡します。
 
-## Environment
+## 環境変数
 
-Copy `web/.env.example` for local development. Required production variables:
+ローカル開発では `web/.env.example` をコピーして使えます。本番で主に使う変数は次のとおりです。
 
-- `GOOGLE_SHEET_ID` (or `SHEET_ID`): target spreadsheet key.
-- `GOOGLE_APPLICATION_CREDENTIALS`: optional when Cloud Run service-account ADC is available.
-- `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD`: only when not using IAP/OAuth.
-- `PORT`: set automatically by Cloud Run.
+- `GOOGLE_SHEET_ID` または `SHEET_ID`: 対象スプレッドシートの ID。
+- `GOOGLE_APPLICATION_CREDENTIALS`: Cloud Run のサービスアカウントを Application Default Credentials として使える場合は省略できます。
+- `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD`: Identity-Aware Proxy などを使わず Basic 認証にする場合だけ設定します。
+- `PORT`: Cloud Run では自動設定されます。
 
-The actual Drive folder IDs are read from the Sheet `Config` rows used by Phase 1:
+Drive フォルダ ID は、ランナーと同じくスプレッドシートの `Config` 行から読みます。
 
 - `drive_input_folder_id`
 - `drive_output_ai_folder_id`
 - `drive_output_gold_folder_id`
 
-## Local development
+## ローカル開発
 
-Backend:
+バックエンド:
 
 ```bash
 pip install -r web/requirements.txt
@@ -57,7 +57,7 @@ export BASIC_AUTH_PASSWORD=change-me
 uvicorn web.backend.app:app --reload --port 8080
 ```
 
-Frontend:
+フロントエンド:
 
 ```bash
 cd web/frontend
@@ -65,11 +65,11 @@ npm install
 npm run dev
 ```
 
-For Vite development, proxy `/api` to the backend if needed or use the built Docker container.
+Vite 開発時は、必要に応じて `/api` をバックエンドへプロキシするか、ビルド済み Docker コンテナを使ってください。
 
-## Docker / Cloud Run
+## Docker と Cloud Run
 
-Build locally:
+ローカルビルド例:
 
 ```bash
 docker build -f web/Dockerfile -t claude-a11y-admin .
@@ -82,7 +82,7 @@ docker run --rm -p 8080:8080 \
   claude-a11y-admin
 ```
 
-Example Cloud Run deploy:
+Cloud Run デプロイ例:
 
 ```bash
 gcloud run deploy claude-a11y-admin \
@@ -93,4 +93,4 @@ gcloud run deploy claude-a11y-admin \
   --no-allow-unauthenticated
 ```
 
-Then enable IAP for the HTTPS load balancer or Cloud Run path used by your organization, and grant access only to the intended group/domain.
+その後、組織で使う HTTPS ロードバランサまたは Cloud Run の経路に Identity-Aware Proxy などを設定し、対象グループまたはドメインだけにアクセスを許可してください。

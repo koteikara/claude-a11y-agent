@@ -36,7 +36,7 @@ cd claude-a11y-agent
 cd /path/to/claude-a11y-agent
 ```
 
-## 4. Python 仮想環境を作成する
+## 4. Python の仮想環境を作成する
 
 依存関係をプロジェクト単位で分離するため、仮想環境の利用を推奨します。
 
@@ -79,7 +79,7 @@ pytest -q
 
 LLM API キーが未設定でも実行できます。
 
-## 7. HTML ペア回帰テストを実行する
+## 7. HTML ペアの回帰テストを実行する
 
 old / ai / gold の HTML fixture を使った検証は、通常 CI では重くなりやすいため、環境変数で明示的に有効化します。
 
@@ -137,7 +137,7 @@ export CLAUDE_MODEL="claude-sonnet-4-20250514"
 pytest -m llm
 ```
 
-## 10. readiness をまとめて確認する
+## 10. 実現度をまとめて確認する
 
 複数回の通常テストと HTML ペア回帰をまとめて実行し、実現度を High / Medium / Low で確認する場合は、Codex skill の pressure test ハーネスを使います。
 
@@ -198,7 +198,7 @@ RUN_HTML_PAIRS=1 pytest -m html_pairs
 | readiness 検査 | `python skills/a11y-pressure-test/scripts/pressure_test.py --repeat 2` |
 
 
-## 14. Sheets / Drive ランナーで運用する
+## 14. スプレッドシート・Drive ランナーで運用する
 
 非エンジニア向けの運用では、Google Sheets をジョブ管理画面、Google Drive を入出力置き場として使います。Python ランナー `a11y_runner/` が `Jobs` の `queued` 行を読み取り、Drive から HTML を取得して `process_page()` を実行し、結果を Sheet と Drive に書き戻します。
 
@@ -219,7 +219,7 @@ python -m a11y_runner init-sheet --sheet <SHEET_ID>
 
 `Config`, `Sites`, `Jobs`, `Runs`, `Review`, `Metrics` の各タブとヘッダを作成します。再実行しても既存行は壊しません。
 
-### 14.3 queued ジョブを確認・実行する
+### 14.3 処理待ちジョブを確認・実行する
 
 ```bash
 python -m a11y_runner run --sheet <SHEET_ID> --dry-run
