@@ -207,16 +207,22 @@ gcloud run jobs execute $RUNNER_JOB `
 
 ## 6. Jobs タブ運用の注意
 
-現行実装では `input_file` は Google Drive 入力フォルダ内のファイル名またはパスです。実運用では `input_file` に実在 URL を入れる方針ですが、URL 取得と `body_xpath` による本文抽出はまだ未実装です。
+`input_file` は Google Drive 入力フォルダ内のファイル名またはパスに加えて、`http://` / `https://` の実在 URL も指定できます。URL 入力では runner が HTML を取得し、`body_xpath` による本文抽出を行います。
 
-URL 入力対応後の `body_xpath` 優先順は次の予定です。
+`body_xpath` 優先順は次のとおりです。
 
 1. Jobs 行の `body_xpath`
 2. Sites タブの `body_xpath`
 3. Config タブの `body_xpath`
 4. 未指定なら `body` 要素全体
 
-未実装事項の一覧は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) を参照してください。
+Jobs タブ例:
+
+| site | page_id | input_file | body_xpath | status |
+|---|---|---|---|---|
+| saga-city | test-url-001 | `https://www.example.jp/path/to/page.html` | `//*[@id="contents-in"]` | queued |
+
+`check_gold` は Google Drive 入力フォルダの old HTML と gold HTML の比較が対象で、URL から old HTML を再取得しません。詳細は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) を参照してください。
 
 ## 7. 定期実行
 

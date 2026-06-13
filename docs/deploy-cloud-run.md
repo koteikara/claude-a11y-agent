@@ -12,7 +12,7 @@
 - Web 管理画面は `--no-allow-unauthenticated` を維持します。
 - Cloud Scheduler による定期実行は必須ではありません。今回の運用では作成せず、必要なときに Cloud Run Jobs を手動実行します。
 
-初心者向けの残作業確認は [`cloud-run-setup-checklist.md`](cloud-run-setup-checklist.md)、トラブルシュートは [`troubleshooting-cloud-run.md`](troubleshooting-cloud-run.md)、URL 入力と `body_xpath` の今後の方針は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) を参照してください。
+初心者向けの残作業確認は [`cloud-run-setup-checklist.md`](cloud-run-setup-checklist.md)、トラブルシュートは [`troubleshooting-cloud-run.md`](troubleshooting-cloud-run.md)、URL 入力と `body_xpath` の仕様は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) を参照してください。
 
 ## 前提
 
@@ -211,16 +211,24 @@ gcloud run jobs execute $RUNNER_JOB `
 
 ## Jobs タブと URL 入力の現状
 
-現行実装では、runner は `input_file` を Google Drive 入力フォルダ内のファイル名またはパスとして扱います。`input_file` が空欄なら `site/page_id.html` を読みます。
+runner は `input_file` を Google Drive 入力フォルダ内のファイル名またはパス、または `http://` / `https://` の実在 URL として扱います。`input_file` が空欄なら `site/page_id.html` を Drive 入力から読みます。
 
-実運用では、`input_file` に実在 URL を指定し、URL から取得した HTML を `body_xpath` で本文部分だけにトリミングして処理する方針です。ただし、この URL 入力対応はまだ未実装です。今後の対応予定は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) に分離しています。
+URL 入力では、URL から取得した HTML を `body_xpath` で本文部分だけにトリミングして処理できます。詳細仕様は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) に分離しています。
 
-予定している `body_xpath` の優先順は次のとおりです。
+`body_xpath` の優先順は次のとおりです。
 
 1. Jobs 行の `body_xpath`
 2. Sites タブの `body_xpath`
 3. Config タブの `body_xpath`
 4. 未指定なら `body` 要素全体
+
+Jobs タブ例:
+
+| site | page_id | input_file | body_xpath | status |
+|---|---|---|---|---|
+| saga-city | test-url-001 | `https://www.example.jp/path/to/page.html` | `//*[@id="contents-in"]` | queued |
+
+`check_gold` は Google Drive 入力フォルダの old HTML と gold HTML の比較が対象で、URL から old HTML を再取得しません。
 
 ## 定期実行は任意
 
