@@ -104,3 +104,24 @@ def test_approve_writes_gold_and_sheet_status(monkeypatch):
     assert drive.files[("gold", "saga-city/sg001.html")] == "<p>ai</p>"
     assert store.rows[JOBS_TAB][0]["review_status"] == "approved"
     assert store.rows[JOBS_TAB][0]["reviewer"] == "ops"
+
+
+def test_create_job_accepts_body_xpath(monkeypatch):
+    store = make_store()
+    drive = InMemoryDriveStore({})
+    client = make_client(monkeypatch, store, drive)
+
+    response = client.post("/api/jobs", json={
+        "site": "saga-city",
+        "page_id": "test-url-001",
+        "input_file": "https://www.example.jp/sample/page.html",
+        "body_xpath": "//*[@id='contents-in']",
+        "provider": "gemini",
+        "priority": 1,
+        "notes": "URL input test",
+    })
+
+    assert response.status_code == 201
+    created = response.json()["job"]
+    assert created["body_xpath"] == "//*[@id='contents-in']"
+    assert store.rows[JOBS_TAB][-1]["body_xpath"] == "//*[@id='contents-in']"

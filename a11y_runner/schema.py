@@ -83,4 +83,5 @@ DEFAULT_CONFIG = {
     "body_xpath": "",
     "run_mode": "batch",
     "default_site": "saga-city",
+    "body_xpath": "",
 }

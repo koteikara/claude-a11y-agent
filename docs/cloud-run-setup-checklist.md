@@ -244,13 +244,15 @@ gcloud run jobs update "${RUNNER_JOB}" \
 ```
 
 
-Jobs タブには、Drive 入力フォルダ内のファイル名だけでなく、実在 URL も `input_file` に指定できます。URL 入力の場合は `body_xpath` に一致する本文要素だけを抽出し、AI 出力と gold 出力は既存の Drive 出力フォルダへ保存されます。
+### Jobs タブの URL 入力例
+
+Cloud Run Jobs で実運用ページを処理する場合は、`Jobs.input_file` に Drive 内ファイル名ではなく URL を指定できます。URL 入力では runner が HTML を取得し、`body_xpath` で本文領域だけを抽出して AI 修正対象にします。`body_xpath` は Jobs 行の値が最優先で、空欄の場合は `Sites.body_xpath`、さらに空欄の場合は `Config.body_xpath`、すべて空欄なら `body` 要素全体を使います。
 
 | job_id | site | page_id | input_file | body_xpath | provider | priority | status | promote_requested | notes |
-|---|---|---|---|---|---|---:|---|---|---|
-| `test-url-001` | `saga-city` | `test-url-001` | `https://www.example.jp/sample/page.html` | `//*[@id="contents-in"]` | `gemini` | `1` | `queued` | `false` | `URL input test` |
+| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- |
+| test-url-001 | saga-city | test-url-001 | `https://www.example.jp/sample/page.html` | `//*[@id="contents-in"]` | gemini | 1 | queued | false | URL input test |
 
-`body_xpath` を Jobs 行で空にした場合は、Config タブの `body_xpath` を fallback として参照します。
+`page_id` は必須です。URL から自動生成されないため、出力先の Drive パスに使う ID を明示してください。
 
 ### 2-8. Job を手動実行する
 
