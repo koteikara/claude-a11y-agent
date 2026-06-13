@@ -6,8 +6,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Callable
+
+import requests
+from lxml import html as lxml_html
 
 from .drive import DriveStore
 from .models import PageResult
@@ -24,6 +28,9 @@ from .sheets import SheetStore, ensure_schema
 from . import engine_adapter
 
 EngineFn = Callable[..., PageResult]
+
+HTTP_INPUT_TIMEOUT_SECONDS = 30
+HTTP_INPUT_USER_AGENT = "claude-a11y-agent/0.1 (+https://github.com/)"
 
 
 class RunnerError(RuntimeError):
@@ -215,13 +222,15 @@ def _run_one_job(store: SheetStore, drive: DriveStore, job: dict, *, config: dic
     row_number = job["_row_number"]
     job_id = job.get("job_id") or uuid.uuid4().hex[:12]
     site = job.get("site") or config.get("default_site", "")
-    page_id = job.get("page_id", "")
+    input_file = str(job.get("input_file") or "").strip()
+    page_id = str(job.get("page_id", "")).strip()
     if not site or not page_id:
         raise RunnerError("site and page_id are required")
 
     store.update_row(JOBS_TAB, row_number, {
         "job_id": job_id,
         "site": site,
+        "page_id": page_id,
         "status": "running",
         "started_at": utc_now(),
         "error": "",
@@ -229,8 +238,8 @@ def _run_one_job(store: SheetStore, drive: DriveStore, job: dict, *, config: dic
 
     provider = job.get("provider") or config.get("llm_provider", "gemini")
     mode = config.get("run_mode", "batch") or "batch"
-    body_xpath = sites.get(site, {}).get("body_xpath", "") or None
-    old_html = drive.read_text(config.get("drive_input_folder_id", ""), _input_path(job, site, page_id))
+    body_xpath = _body_xpath(job, site, sites, config)
+    old_html = _load_input_html(drive, job, site, page_id, config, body_xpath=body_xpath)
     result = engine(old_html, site=site, page_id=page_id, body_xpath=body_xpath, provider=provider, mode=mode)
     ai_path = f"{site}/{page_id}.html"
     ai_link = drive.write_text(config.get("drive_output_ai_folder_id", ""), ai_path, result.ai_html)
@@ -277,6 +286,56 @@ def _site_config(store: SheetStore) -> dict:
     return {row.get("site", ""): row for row in store.get_rows(SITES_TAB) if row.get("site")}
 
 
+def _load_input_html(drive: DriveStore, job: dict, site: str, page_id: str, config: dict, *, body_xpath: str | None) -> str:
+    input_value = str(job.get("input_file") or "").strip()
+    if _is_url(input_value):
+        return _extract_body_html(_fetch_url_html(input_value), body_xpath)
+    return drive.read_text(config.get("drive_input_folder_id", ""), _input_path(job, site, page_id))
+
+
+def _is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _fetch_url_html(url: str) -> str:
+    response = requests.get(
+        url,
+        headers={"User-Agent": HTTP_INPUT_USER_AGENT},
+        timeout=HTTP_INPUT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    if not response.encoding and response.apparent_encoding:
+        response.encoding = response.apparent_encoding
+    elif response.apparent_encoding and response.encoding.lower() in {"iso-8859-1", "ascii"}:
+        response.encoding = response.apparent_encoding
+    return response.text
+
+
+def _body_xpath(job: dict, site: str, sites: dict, config: dict) -> str | None:
+    return (
+        str(job.get("body_xpath") or "").strip()
+        or str(sites.get(site, {}).get("body_xpath") or "").strip()
+        or str(config.get("body_xpath") or "").strip()
+        or None
+    )
+
+
+def _extract_body_html(source_html: str, body_xpath: str | None) -> str:
+    root = lxml_html.fromstring(source_html)
+    if body_xpath:
+        matches = root.xpath(body_xpath)
+        if not matches:
+            raise RunnerError(f"body_xpath not found: {body_xpath}")
+        element = matches[0]
+    else:
+        matches = root.xpath("//body")
+        element = matches[0] if matches else root
+    if not hasattr(element, "tag"):
+        raise RunnerError(f"body_xpath did not select an HTML element: {body_xpath}")
+    return lxml_html.tostring(element, encoding="unicode", method="html")
+
+
 def _truthy(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
@@ -289,8 +348,77 @@ def _priority(row: dict) -> tuple[int, str]:
         return 999999, str(value)
 
 
+def _read_input_html(job: dict, site: str, page_id: str, config: dict, drive: DriveStore, *,
+                     body_xpath: str | None = None) -> str:
+    input_file = str(job.get("input_file") or "").strip()
+    input_folder = config.get("drive_input_folder_id", "")
+    input_path = _input_path(job, site, page_id)
+    if not _is_url_input(input_file):
+        return drive.read_text(input_folder, input_path)
+
+    html = _extract_body_html(_fetch_url_html(input_file), body_xpath)
+    drive.write_text(input_folder, input_path, html)
+    return html
+
+
+def _fetch_url_html(url: str, *, timeout: float = 20.0) -> str:
+    try:
+        response = requests.get(url, timeout=timeout, headers={"User-Agent": "claude-a11y-agent/1.0"})
+        response.raise_for_status()
+    except requests.exceptions.Timeout as exc:
+        raise RunnerError(f"URL fetch timed out after {timeout:g}s: {url}") from exc
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        raise RunnerError(f"URL fetch HTTP error {status}: {url}") from exc
+    except requests.exceptions.RequestException as exc:
+        raise RunnerError(f"URL fetch failed: {url}: {exc}") from exc
+
+    encoding = response.apparent_encoding or response.encoding or "utf-8"
+    try:
+        return response.content.decode(encoding)
+    except (LookupError, UnicodeDecodeError) as exc:
+        raise RunnerError(f"URL fetch character encoding error ({encoding}): {url}: {exc}") from exc
+
+
+def _resolve_body_xpath(job: dict, config: dict, sites: dict, site: str) -> str | None:
+    return (
+        str(job.get("body_xpath") or "").strip()
+        or str(config.get("body_xpath") or "").strip()
+        or str(sites.get(site, {}).get("body_xpath") or "").strip()
+        or None
+    )
+
+
+def _extract_body_html(html_text: str, body_xpath: str | None) -> str:
+    from lxml import etree, html
+
+    root = html.fromstring(html_text)
+    xpath = (body_xpath or "").strip()
+    if xpath:
+        try:
+            matches = root.xpath(xpath)
+        except etree.XPathError as exc:
+            raise RunnerError(f"body_xpath is invalid: {xpath}: {exc}") from exc
+        if not matches:
+            raise RunnerError(f"body_xpath did not match any element: {xpath}")
+        target = matches[0]
+    else:
+        body_matches = root.xpath("//body")
+        target = body_matches[0] if body_matches else root
+
+    if not isinstance(target, etree._Element):
+        raise RunnerError(f"body_xpath did not match an element: {xpath}")
+    return html.tostring(target, encoding="unicode", method="html")
+
+
+def _is_url_input(value: str) -> bool:
+    return value.lower().startswith(("http://", "https://"))
+
+
 def _input_path(job: dict, site: str, page_id: str) -> str:
     value = str(job.get("input_file") or "").strip()
+    if _is_url_input(value):
+        return f"{site}/{page_id}.html"
     return value or f"{site}/{page_id}.html"
 
 

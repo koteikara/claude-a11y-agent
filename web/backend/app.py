@@ -59,6 +59,7 @@ class JobCreate(BaseModel):
     site: str = Field(..., min_length=1)
     page_id: str = Field(..., min_length=1)
     input_file: str | None = None
+    body_xpath: str | None = None
     provider: str | None = None
     priority: int | str | None = None
     notes: str | None = None
@@ -124,6 +125,7 @@ def create_job(payload: JobCreate, store: SheetStore = Depends(get_sheet_store))
         "site": payload.site,
         "page_id": payload.page_id,
         "input_file": payload.input_file or "",
+        "body_xpath": payload.body_xpath or "",
         "provider": payload.provider or "",
         "priority": payload.priority or "",
         "status": "queued",
