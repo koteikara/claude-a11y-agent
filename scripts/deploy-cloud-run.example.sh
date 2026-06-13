@@ -123,10 +123,15 @@ gcloud secrets add-iam-policy-binding "${LLM_SECRET_NAME}" \
   --member "serviceAccount:${RUNNER_SA}" \
   --role roles/secretmanager.secretAccessor
 
-gcloud builds submit \
-  --tag "${IMAGE}" \
-  -f web/Dockerfile \
-  .
+cat > cloudbuild.local.yaml <<EOF_BUILD
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-f', 'web/Dockerfile', '-t', '${IMAGE}', '.']
+images:
+- '${IMAGE}'
+EOF_BUILD
+
+gcloud builds submit --config cloudbuild.local.yaml .
 
 gcloud run deploy "${WEB_SERVICE}" \
   --image "${IMAGE}" \
@@ -147,7 +152,7 @@ gcloud run jobs "${JOB_VERB}" "${RUNNER_JOB}" \
   --region "${REGION}" \
   --service-account "${RUNNER_SA}" \
   --command python \
-  --args -m,a11y_runner,run,--sheet,"${SHEET_ID}",--site,"${SITE}",--limit,"${LIMIT}" \
+  --args "-m,a11y_runner,run,--sheet,${SHEET_ID},--site,${SITE},--limit,${LIMIT}" \
   --set-env-vars "LLM_PROVIDER=${LLM_PROVIDER}" \
   --set-secrets "${LLM_SECRET_ENV}" \
   --tasks 1 \

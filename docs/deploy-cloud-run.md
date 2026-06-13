@@ -1,400 +1,239 @@
 # Cloud Run デプロイ手順
 
-この手順は、Web 管理画面を **Cloud Run Service**、runner を **Cloud Run Jobs** として運用するための管理者向けメモです。Secret Manager を使い、Cloud Run の実行サービスアカウントで Google Sheets / Drive にアクセスします。Cloud Run では `GOOGLE_APPLICATION_CREDENTIALS` を設定せず、サービスアカウント JSON 鍵ファイルを使わないでください。
+この手順は、Web 管理画面を **Cloud Run Service**、runner を **Cloud Run Jobs** として運用するための管理者向けメモです。Cloud Run Service / Cloud Run Jobs の環境構築は一通り完了しており、今後はこの構成を前提に運用します。
 
-プロジェクト作成、必要 API の有効化、Cloud Run 用サービスアカウント作成が完了済みで、残りの作業だけを順番に進めたい場合は、初心者向けのチェックリスト [`docs/cloud-run-setup-checklist.md`](cloud-run-setup-checklist.md) を使ってください。`PROJECT_ID` / `REGION` / `SHEET_ID` / Drive フォルダ ID / Secret 名を差し替えるだけで進められるように、Google Cloud Console で行う操作と `gcloud` で行う操作を分けています。
+## 現在の推奨運用
 
-## 方針
+- Web 管理画面は Cloud Run Service `claude-a11y-admin` として運用します。
+- runner は Cloud Run Jobs `claude-a11y-runner` として運用します。
+- API キーや Basic 認証パスワードは Secret Manager から注入します。
+- Cloud Run では `GOOGLE_APPLICATION_CREDENTIALS` を設定しません。
+- サービスアカウント JSON 鍵は作成・保存・コミットしません。
+- Web 管理画面は `--no-allow-unauthenticated` を維持します。
+- Cloud Scheduler による定期実行は必須ではありません。今回の運用では作成せず、必要なときに Cloud Run Jobs を手動実行します。
 
-- Web 管理画面: Cloud Run Service として起動します。
-- runner: Cloud Run Jobs として起動し、必要に応じて Cloud Scheduler から実行します。
-- 認証: Cloud Run Service は `--no-allow-unauthenticated` を必須にし、組織の Cloud Run IAM / IAP で保護します。Basic 認証はローカルまたは二重防御用です。
-- 秘密情報: API キーや Basic 認証パスワードは Secret Manager から環境変数へ注入します。
-- Google Sheets / Drive: 対象スプレッドシートと Drive フォルダを、Cloud Run 実行サービスアカウントのメールアドレスに共有します。
-- ローカル開発: `gcloud auth application-default login` による ADC、または `.env.example` をコピーした untracked `.env` を使います。
+初心者向けの残作業確認は [`cloud-run-setup-checklist.md`](cloud-run-setup-checklist.md)、トラブルシュートは [`troubleshooting-cloud-run.md`](troubleshooting-cloud-run.md)、URL 入力と `body_xpath` の今後の方針は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) を参照してください。
 
-## コンテナと起動コマンド
+## 前提
 
-`web/Dockerfile` は Web 管理画面と runner の共通イメージです。
+完了済みのもの:
 
-- frontend は `web/frontend` をビルドして `web/frontend/dist` に配置します。
-- backend には `web/backend`、`a11y_runner`、`a11y_testkit`、runner 依存関係を含めます。
-- Cloud Run Service の Web 起動コマンドは Dockerfile の既定 CMD です。
+- Google Cloud プロジェクト作成
+- 必要 API 有効化
+- Cloud Run 用サービスアカウント作成
+- Secret Manager への Secret 登録
+  - `claude-a11y-basic-auth-password`
+  - `claude-a11y-gemini-api-key`
+- Secret へのアクセス権付与
+- Artifact Registry へのイメージ push
+- Cloud Run Service `claude-a11y-admin` デプロイ
+- Cloud Run Jobs `claude-a11y-runner` 作成
+- Cloud Run Jobs の手動実行成功
+- `/docs` が `401 Authentication required` になるところまで確認済み
 
-```bash
-uvicorn web.backend.app:app --host 0.0.0.0 --port ${PORT:-8080}
+`/docs` の `401 Authentication required` は、Cloud Run IAM 認証を通過し、FastAPI アプリ側の Basic 認証まで到達していることを示します。
+
+## PowerShell の作業ディレクトリと変数
+
+Windows PowerShell では、まずリポジトリへ移動します。
+
+```powershell
+cd C:\Users\nakagawa.to\claude-a11y-agent
 ```
 
-Cloud Run は `PORT` を自動注入するため、本番で `PORT` を明示設定する必要は通常ありません。起動確認用に、秘密情報や Sheets / Drive 内容を返さない `GET /healthz` を提供しています。
+PowerShell の変数設定例です。Secret 値、API キー、パスワード、実在の Sheet ID はここに書かず、実行環境で差し替えてください。
 
-runner は同じイメージの command / args を Cloud Run Jobs 側で上書きします。
+```powershell
+$PROJECT_ID="your-project-id"
+$REGION="asia-northeast1"
+$REPOSITORY="claude-a11y"
+$IMAGE_TAG=Get-Date -Format "yyyyMMdd-HHmmss"
+$IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/claude-a11y:$IMAGE_TAG"
 
-```bash
-python -m a11y_runner run --sheet SHEET_ID --site saga-city --limit 10
+$SHEET_ID="your-google-sheet-id"
+$WEB_SERVICE="claude-a11y-admin"
+$RUNNER_JOB="claude-a11y-runner"
+$WEB_SA="claude-a11y-admin@$PROJECT_ID.iam.gserviceaccount.com"
+$RUNNER_SA="claude-a11y-runner@$PROJECT_ID.iam.gserviceaccount.com"
+
+$SECRET_BASIC_AUTH_PASSWORD="claude-a11y-basic-auth-password"
+$SECRET_GEMINI_API_KEY="claude-a11y-gemini-api-key"
+
+gcloud config set project $PROJECT_ID
 ```
 
-`--sheet` を省略した場合、runner は `A11Y_SHEET_ID`、`GOOGLE_SHEET_ID`、`SHEET_ID` の順に環境変数から読みます。
-
-## 必要な環境変数
-
-### Web 管理画面（Cloud Run Service）
-
-| 変数 | 必須 | Secret Manager 推奨 | 用途 |
-|---|---:|---:|---|
-| `GOOGLE_SHEET_ID` | 必須 | いいえ | 管理台帳の Google Sheets ID。`SHEET_ID` も互換 fallback として利用できます。 |
-| `SHEET_ID` | 任意 | いいえ | `GOOGLE_SHEET_ID` 未設定時の fallback。 |
-| `BASIC_AUTH_USERNAME` | 条件付き | 任意 | Basic 認証を併用する場合だけ設定します。 |
-| `BASIC_AUTH_PASSWORD` | 条件付き | はい | Basic 認証を併用する場合だけ設定します。 |
-| `GEMINI_API_KEY` | Gemini を Web から実行する場合 | はい | Web 画面からジョブ実行する場合の Gemini API キー。 |
-| `ANTHROPIC_API_KEY` | Claude を Web から実行する場合 | はい | Web 画面からジョブ実行する場合の Anthropic API キー。 |
-| `LLM_PROVIDER` | 任意 | いいえ | 既定 provider。Sheets `Config` / job 行が優先されます。 |
-| `GEMINI_MODEL` | 任意 | いいえ | Gemini モデル名。 |
-| `CLAUDE_MODEL` | 任意 | いいえ | Claude モデル名。 |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Cloud Run では設定禁止 | いいえ | ローカルで JSON 鍵を使う例外時だけ設定します。 |
-| `AUTH_DISABLED_FOR_TESTS` | 本番禁止 | いいえ | ユニットテスト専用。Cloud Run では設定しません。 |
-| `PORT` | 自動 | いいえ | Cloud Run が自動設定します。 |
-
-### runner（Cloud Run Jobs）
-
-| 変数 | 必須 | Secret Manager 推奨 | 用途 |
-|---|---:|---:|---|
-| `A11Y_SHEET_ID` | `--sheet` を省略する場合 | いいえ | runner が参照する Google Sheets ID。 |
-| `GOOGLE_SHEET_ID` / `SHEET_ID` | 任意 | いいえ | `A11Y_SHEET_ID` 未設定時の fallback。 |
-| `GEMINI_API_KEY` | Gemini 利用時 | はい | Gemini API キー。 |
-| `ANTHROPIC_API_KEY` | Claude 利用時 | はい | Anthropic API キー。 |
-| `LLM_PROVIDER` | 任意 | いいえ | 既定 provider。Sheets `Config` / job 行が優先されます。 |
-| `GEMINI_MODEL` | 任意 | いいえ | Gemini モデル名。 |
-| `CLAUDE_MODEL` | 任意 | いいえ | Claude モデル名。 |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Cloud Run では設定禁止 | いいえ | ローカルで JSON 鍵を使う例外時だけ設定します。 |
-
-Drive フォルダ ID は環境変数ではなく、Sheets の `Config` タブから読みます。
-
-| Config key | 用途 |
-|---|---|
-| `drive_input_folder_id` | 入力 HTML の Drive フォルダ ID |
-| `drive_output_ai_folder_id` | AI 下書き HTML の出力先 Drive フォルダ ID |
-| `drive_output_gold_folder_id` | 承認済み gold HTML の出力先 Drive フォルダ ID |
-| `llm_provider` | job 行に provider がない場合の既定 provider |
-| `run_mode` | `batch` / `interactive` などの実行モード |
-| `default_site` | 既定 site |
-
-## Google Cloud 初期設定
-
-以下は `PROJECT_ID`、`REGION`、`TAG`、`SHEET_ID` を置き換えて実行してください。初期設定済みの環境で残作業だけ進める場合は、以降の詳細説明より先に [`docs/cloud-run-setup-checklist.md`](cloud-run-setup-checklist.md) のチェックリストを使うと安全です。
+bash の場合は次の形式です。
 
 ```bash
 export PROJECT_ID="your-project-id"
 export REGION="asia-northeast1"
 export REPOSITORY="claude-a11y"
-export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/claude-a11y:TAG"
+export IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
+export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/claude-a11y:${IMAGE_TAG}"
+
 export SHEET_ID="your-google-sheet-id"
+export WEB_SERVICE="claude-a11y-admin"
+export RUNNER_JOB="claude-a11y-runner"
+export WEB_SA="claude-a11y-admin@${PROJECT_ID}.iam.gserviceaccount.com"
+export RUNNER_SA="claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+
+export SECRET_BASIC_AUTH_PASSWORD="claude-a11y-basic-auth-password"
+export SECRET_GEMINI_API_KEY="claude-a11y-gemini-api-key"
+
 gcloud config set project "${PROJECT_ID}"
 ```
 
-必要 API を有効化します。
+PowerShell の継続行はバッククォート `` ` `` です。バッククォートの後ろに空白を置くと意図どおり継続されないため、行末の最後の文字にしてください。bash の `\` 継続行と混同しないでください。
 
-```bash
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  cloudbuild.googleapis.com \
-  secretmanager.googleapis.com \
-  sheets.googleapis.com \
-  drive.googleapis.com
+## Artifact Registry / Cloud Build
+
+`gcloud builds submit --tag $IMAGE -f web/Dockerfile .` のように `-f` を直接渡す方法は使いません。Cloud Build 設定ファイルを作成してから submit します。
+
+### PowerShell
+
+```powershell
+@"
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-f', 'web/Dockerfile', '-t', '${IMAGE}', '.']
+images:
+- '${IMAGE}'
+"@ | Set-Content cloudbuild.local.yaml -Encoding UTF8
+
+gcloud builds submit --config cloudbuild.local.yaml .
 ```
 
-Cloud Scheduler を使う場合は追加で有効化します。
+PowerShell に Cloud Build ログが表示されない場合は、build ID を使って状態を確認します。
 
-```bash
-gcloud services enable cloudscheduler.googleapis.com
+```powershell
+gcloud builds describe BUILD_ID --format="value(status)"
 ```
 
-Artifact Registry を作成します。既にある場合は不要です。
+### bash
 
 ```bash
-gcloud artifacts repositories create "${REPOSITORY}" \
-  --repository-format docker \
-  --location "${REGION}" \
-  --description "Claude A11y Cloud Run images"
+cat > cloudbuild.local.yaml <<EOF_BUILD
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-f', 'web/Dockerfile', '-t', '${IMAGE}', '.']
+images:
+- '${IMAGE}'
+EOF_BUILD
+
+gcloud builds submit --config cloudbuild.local.yaml .
 ```
 
-実行サービスアカウントを作成します。
+## Cloud Run Service のデプロイ
 
-```bash
-gcloud iam service-accounts create claude-a11y-admin \
-  --display-name "Claude A11y Web admin runtime"
+Web 管理画面は未認証公開しません。必ず `--no-allow-unauthenticated` を指定します。
 
-gcloud iam service-accounts create claude-a11y-runner \
-  --display-name "Claude A11y runner job runtime"
-```
-
-対象 Google スプレッドシート、入力 Drive フォルダ、AI 出力 Drive フォルダ、gold 出力 Drive フォルダを、次のメールアドレスに共有してください。IAM ロールだけでは Sheets / Drive ファイルにはアクセスできません。
-
-- `claude-a11y-admin@PROJECT_ID.iam.gserviceaccount.com`
-- `claude-a11y-runner@PROJECT_ID.iam.gserviceaccount.com`
-
-## Secret Manager
-
-本物の値はコマンド履歴に残らない方法で登録してください。API キーやパスワードをコマンド行へ直接貼らず、次のように非表示プロンプトで入力します。Secret が既に存在する場合は新しい version を追加します。
-
-```bash
-read -rsp "Basic auth password: " BASIC_AUTH_PASSWORD_VALUE; echo
-printf '%s' "${BASIC_AUTH_PASSWORD_VALUE}" | \
-  gcloud secrets create claude-a11y-basic-auth-password --data-file=- \
-  || printf '%s' "${BASIC_AUTH_PASSWORD_VALUE}" | \
-    gcloud secrets versions add claude-a11y-basic-auth-password --data-file=-
-unset BASIC_AUTH_PASSWORD_VALUE
-
-read -rsp "Gemini API key: " GEMINI_API_KEY_VALUE; echo
-printf '%s' "${GEMINI_API_KEY_VALUE}" | \
-  gcloud secrets create claude-a11y-gemini-api-key --data-file=- \
-  || printf '%s' "${GEMINI_API_KEY_VALUE}" | \
-    gcloud secrets versions add claude-a11y-gemini-api-key --data-file=-
-unset GEMINI_API_KEY_VALUE
-```
-
-Claude を使う場合だけ Anthropic API キーも登録します。
-
-```bash
-read -rsp "Anthropic API key: " ANTHROPIC_API_KEY_VALUE; echo
-printf '%s' "${ANTHROPIC_API_KEY_VALUE}" | \
-  gcloud secrets create claude-a11y-anthropic-api-key --data-file=- \
-  || printf '%s' "${ANTHROPIC_API_KEY_VALUE}" | \
-    gcloud secrets versions add claude-a11y-anthropic-api-key --data-file=-
-unset ANTHROPIC_API_KEY_VALUE
-```
-
-Secret を読む実行サービスアカウントへ最小限の権限を付与します。Web 管理画面には Web で使う Secret だけ、runner には runner で使う Secret だけを許可します。
-
-```bash
-gcloud secrets add-iam-policy-binding claude-a11y-basic-auth-password \
-  --member "serviceAccount:claude-a11y-admin@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role roles/secretmanager.secretAccessor
-
-gcloud secrets add-iam-policy-binding claude-a11y-gemini-api-key \
-  --member "serviceAccount:claude-a11y-admin@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role roles/secretmanager.secretAccessor
-
-gcloud secrets add-iam-policy-binding claude-a11y-gemini-api-key \
-  --member "serviceAccount:claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role roles/secretmanager.secretAccessor
-```
-
-サービスアカウント JSON 鍵を Secret Manager に保存する手順は採用しません。
-
-## イメージビルド
-
-この操作は Artifact Registry へ push できる権限と Cloud Build を実行できる権限が必要です。Google Cloud の Owner 権限を前提にせず、必要なロールだけを管理者に付与してもらってください。
-
-```bash
-gcloud builds submit \
-  --tag "${IMAGE}" \
-  -f web/Dockerfile \
-  .
-```
-
-## Web 管理画面を Cloud Run Service へデプロイ
-
-`--no-allow-unauthenticated` を外さないでください。以下は Basic 認証を二重防御として併用する例です。
-
-```bash
-gcloud run deploy claude-a11y-admin \
-  --image "${IMAGE}" \
-  --region "${REGION}" \
-  --service-account "claude-a11y-admin@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --set-env-vars "GOOGLE_SHEET_ID=${SHEET_ID},BASIC_AUTH_USERNAME=admin,LLM_PROVIDER=gemini" \
-  --set-secrets "BASIC_AUTH_PASSWORD=claude-a11y-basic-auth-password:latest,GEMINI_API_KEY=claude-a11y-gemini-api-key:latest" \
+```powershell
+gcloud run deploy $WEB_SERVICE `
+  --image $IMAGE `
+  --region $REGION `
+  --service-account $WEB_SA `
+  --set-env-vars "GOOGLE_SHEET_ID=$SHEET_ID,BASIC_AUTH_USERNAME=admin,LLM_PROVIDER=gemini" `
+  --set-secrets "BASIC_AUTH_PASSWORD=$SECRET_BASIC_AUTH_PASSWORD`:latest,GEMINI_API_KEY=$SECRET_GEMINI_API_KEY`:latest" `
   --no-allow-unauthenticated
 ```
 
-デプロイ後、組織の方針に合わせて Cloud Run IAM または HTTPS ロードバランサ + Serverless NEG + IAP で閲覧者を制限してください。認証なし公開をデフォルトにしないでください。閲覧者に Cloud Run IAM で許可する場合は `roles/run.invoker` を個別のユーザーまたはグループへ付与します。`allUsers` や `allAuthenticatedUsers` は指定しないでください。
+閲覧するユーザーまたはグループには `roles/run.invoker` を付与します。
 
-起動確認例:
-
-```bash
-SERVICE_URL="$(gcloud run services describe claude-a11y-admin --region "${REGION}" --format 'value(status.url)')"
-curl -fsS -H "Authorization: Bearer $(gcloud auth print-identity-token)" "${SERVICE_URL}/healthz"
-```
-
-## runner を Cloud Run Jobs へ作成
-
-### queued ジョブ処理
-
-```bash
-gcloud run jobs create claude-a11y-runner \
-  --image "${IMAGE}" \
-  --region "${REGION}" \
-  --service-account "claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --command python \
-  --args -m,a11y_runner,run,--sheet,"${SHEET_ID}",--site,saga-city,--limit,10 \
-  --set-env-vars "LLM_PROVIDER=gemini" \
-  --set-secrets "GEMINI_API_KEY=claude-a11y-gemini-api-key:latest" \
-  --tasks 1 \
-  --parallelism 1 \
-  --task-timeout 3600
-```
-
-
-Jobs タブには、Drive 入力フォルダ内のファイル名だけでなく、実在 URL も `input_file` に指定できます。URL 入力の場合は `body_xpath` に一致する本文要素だけを抽出し、AI 出力と gold 出力は既存の Drive 出力フォルダへ保存されます。
-
-| job_id | site | page_id | input_file | body_xpath | provider | priority | status | promote_requested | notes |
-|---|---|---|---|---|---|---:|---|---|---|
-| `test-url-001` | `saga-city` | `test-url-001` | `https://www.example.jp/sample/page.html` | `//*[@id="contents-in"]` | `gemini` | `1` | `queued` | `false` | `URL input test` |
-
-`body_xpath` を Jobs 行で空にした場合は、Config タブの `body_xpath` を fallback として参照します。
-
-`A11Y_SHEET_ID` を環境変数にして `--sheet` を省略する例です。
-
-```bash
-gcloud run jobs create claude-a11y-runner-env-sheet \
-  --image "${IMAGE}" \
-  --region "${REGION}" \
-  --service-account "claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --command python \
-  --args -m,a11y_runner,run,--site,saga-city,--limit,10 \
-  --set-env-vars "A11Y_SHEET_ID=${SHEET_ID},LLM_PROVIDER=gemini" \
-  --set-secrets "GEMINI_API_KEY=claude-a11y-gemini-api-key:latest" \
-  --tasks 1 \
-  --parallelism 1 \
-  --task-timeout 3600
-```
-
-
-### Jobs タブの URL 入力例
-
-Cloud Run Jobs で実運用ページを処理する場合は、`Jobs.input_file` に Drive 内ファイル名ではなく URL を指定できます。URL 入力では runner が HTML を取得し、`body_xpath` で本文領域だけを抽出して AI 修正対象にします。`body_xpath` は Jobs 行の値が最優先で、空欄の場合は `Sites.body_xpath`、さらに空欄の場合は `Config.body_xpath`、すべて空欄なら `body` 要素全体を使います。
-
-| job_id | site | page_id | input_file | body_xpath | provider | priority | status | promote_requested | notes |
-| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- |
-| test-url-001 | saga-city | test-url-001 | `https://www.example.jp/sample/page.html` | `//*[@id="contents-in"]` | gemini | 1 | queued | false | URL input test |
-
-`page_id` は必須です。URL から自動生成されないため、出力先の Drive パスに使う ID を明示してください。
-
-実行例:
-
-```bash
-gcloud run jobs execute claude-a11y-runner \
-  --region "${REGION}" \
-  --wait
-```
-
-### schema 初期化、gold チェック、promote
-
-必要に応じて一時 Job を作るか、既存 Job の `--args` を更新します。
-
-```bash
-gcloud run jobs create claude-a11y-init-sheet \
-  --image "${IMAGE}" \
-  --region "${REGION}" \
-  --service-account "claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --command python \
-  --args -m,a11y_runner,init-sheet,--sheet,"${SHEET_ID}" \
-  --tasks 1 \
-  --parallelism 1 \
-  --task-timeout 600
-```
-
-```bash
-gcloud run jobs create claude-a11y-check-gold \
-  --image "${IMAGE}" \
-  --region "${REGION}" \
-  --service-account "claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --command python \
-  --args -m,a11y_runner,check,--sheet,"${SHEET_ID}",--site,saga-city \
-  --tasks 1 \
-  --parallelism 1 \
-  --task-timeout 1800
-```
-
-```bash
-gcloud run jobs create claude-a11y-promote \
-  --image "${IMAGE}" \
-  --region "${REGION}" \
-  --service-account "claude-a11y-runner@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --command python \
-  --args -m,a11y_runner,promote,--sheet,"${SHEET_ID}" \
-  --tasks 1 \
-  --parallelism 1 \
-  --task-timeout 1800
-```
-
-## Cloud Scheduler で Jobs を定期実行する場合
-
-Cloud Scheduler 設定は必須ではありません。手動実行で問題なく動くことを確認してから設定してください。
-
-Scheduler 用サービスアカウントを作成し、対象 Job の実行権限だけを付与します。
-
-```bash
-gcloud iam service-accounts create claude-a11y-scheduler \
-  --display-name "Claude A11y scheduler invoker"
-
-gcloud run jobs add-iam-policy-binding claude-a11y-runner \
-  --region "${REGION}" \
-  --member "serviceAccount:claude-a11y-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" \
+```powershell
+$WEB_VIEWER="user:viewer@example.com"
+gcloud run services add-iam-policy-binding $WEB_SERVICE `
+  --region $REGION `
+  --member $WEB_VIEWER `
   --role roles/run.invoker
 ```
 
-スケジュール例:
+ブラウザで `Forbidden` になる場合は、`roles/run.invoker` を付与したアカウントと、ブラウザでログインしている Google アカウントが一致しているか確認してください。
 
-```bash
-gcloud scheduler jobs create http claude-a11y-runner-nightly \
-  --location "${REGION}" \
-  --schedule "0 2 * * *" \
-  --uri "https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/claude-a11y-runner:run" \
-  --http-method POST \
-  --oauth-service-account-email "claude-a11y-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --oauth-token-scope "https://www.googleapis.com/auth/cloud-platform"
+## Web 到達確認
+
+Cloud Run Service は IAM 認証で保護されているため、PowerShell では ID トークン付きで確認します。
+
+```powershell
+$SERVICE_URL = gcloud run services describe claude-a11y-admin --region asia-northeast1 --format "value(status.url)"
+
+curl.exe -i `
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" `
+  "$SERVICE_URL/docs"
 ```
 
-## ローカル起動と確認
+`401 Authentication required` が返れば、Cloud Run IAM 認証は通っており、FastAPI アプリ側の Basic 認証まで到達しています。
 
-ADC を使う場合:
+現行実装の `/healthz` は Basic 認証の対象外で、成功時に次を返します。
 
-```bash
-gcloud auth application-default login
-cp .env.example .env
-python -m a11y_runner run --dry-run --site saga-city --limit 3
+```json
+{"status":"ok"}
 ```
 
-Web 管理画面のローカル起動:
+Cloud Run 上では `/healthz` も Cloud Run IAM の保護を受けるため、ID トークン付きで確認します。
 
-```bash
-pip install -r web/requirements.txt
-export GOOGLE_SHEET_ID="your-google-sheet-id"
-export BASIC_AUTH_USERNAME="admin"
-export BASIC_AUTH_PASSWORD="change-me"
-uvicorn web.backend.app:app --host 0.0.0.0 --port 8080
+```powershell
+curl.exe -i `
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" `
+  "$SERVICE_URL/healthz"
 ```
 
-別ターミナルで起動確認します。
+`/healthz` はアプリの生存確認、`/docs` の `401` は Cloud Run IAM 通過と Basic 認証到達の確認、と役割を分けて考えると混乱しにくくなります。
 
-```bash
-curl -fsS http://localhost:8080/healthz
+## Cloud Run Jobs の作成・更新
+
+PowerShell では `--args` を必ず 1 つの文字列としてクォートしてください。`--args -m,...` のように書くと PowerShell 側でパースエラーになることがあります。
+
+```powershell
+gcloud run jobs update $RUNNER_JOB `
+  --image $IMAGE `
+  --region $REGION `
+  --service-account $RUNNER_SA `
+  --command "python" `
+  --args="-m,a11y_runner,run,--sheet,$SHEET_ID,--site,saga-city,--limit,1" `
+  --set-env-vars "LLM_PROVIDER=gemini" `
+  --set-secrets "GEMINI_API_KEY=$SECRET_GEMINI_API_KEY`:latest" `
+  --tasks 1 `
+  --parallelism 1 `
+  --task-timeout 3600
 ```
 
-Docker 起動確認:
+新規作成時は `update` を `create` に置き換えます。
 
-```bash
-docker build -f web/Dockerfile -t claude-a11y-admin .
-docker run --rm -p 8080:8080 \
-  -e GOOGLE_SHEET_ID="your-google-sheet-id" \
-  -e BASIC_AUTH_USERNAME="admin" \
-  -e BASIC_AUTH_PASSWORD="change-me" \
-  claude-a11y-admin
+手動実行:
+
+```powershell
+gcloud run jobs execute $RUNNER_JOB `
+  --region $REGION `
+  --wait
 ```
 
-別ターミナル:
+`Jobs` タブにヘッダーしかない、または `status=queued` の対象行がない場合、runner は `n_total: 0` で正常終了します。これは環境構築失敗ではありません。
 
-```bash
-curl -fsS http://localhost:8080/healthz
-```
+## Jobs タブと URL 入力の現状
 
-## 運用上の注意
+現行実装では、runner は `input_file` を Google Drive 入力フォルダ内のファイル名またはパスとして扱います。`input_file` が空欄なら `site/page_id.html` を読みます。
 
-- Cloud Run Service では `--no-allow-unauthenticated` を必ず指定します。`--allow-unauthenticated` は使いません。
-- `AUTH_DISABLED_FOR_TESTS` は本番に設定しません。
-- Cloud Run では `GOOGLE_APPLICATION_CREDENTIALS` を設定しません。
-- runner は Sheets 行を更新するため、まずは `--tasks 1 --parallelism 1` と小さめの `--limit` で開始してください。
-- 複数 runner を同時実行すると同じ `queued` 行を処理する可能性があるため、単一実行を基本にしてください。
-- Secret Manager には API キーやパスワードだけを置き、サービスアカウント JSON 鍵は置かないでください。
-- 残作業を順番に確認する場合は [`docs/cloud-run-setup-checklist.md`](cloud-run-setup-checklist.md)、サンプルをコピーして自動化する場合は [`scripts/deploy-cloud-run.example.sh`](../scripts/deploy-cloud-run.example.sh) を参照してください。
+実運用では、`input_file` に実在 URL を指定し、URL から取得した HTML を `body_xpath` で本文部分だけにトリミングして処理する方針です。ただし、この URL 入力対応はまだ未実装です。今後の対応予定は [`url-input-and-body-xpath.md`](url-input-and-body-xpath.md) に分離しています。
+
+予定している `body_xpath` の優先順は次のとおりです。
+
+1. Jobs 行の `body_xpath`
+2. Sites タブの `body_xpath`
+3. Config タブの `body_xpath`
+4. 未指定なら `body` 要素全体
+
+## 定期実行は任意
+
+今回の運用では Cloud Scheduler は作成しません。必要になった場合だけ、Scheduler 用サービスアカウントを作成し、対象 Cloud Run Job に `roles/run.invoker` を付与してからスケジュールを作成してください。メイン手順では手動実行を基本とします。
+
+## 関連トラブルシュート
+
+今回発生した問題の対処は [`troubleshooting-cloud-run.md`](troubleshooting-cloud-run.md) にまとめています。
+
+- `gcloud` が認識されない。
+- Artifact Registry の `describe` が `NOT_FOUND` になる。
+- `gcloud builds submit -f` が `unrecognized arguments` になる。
+- Cloud Build ログが PowerShell に出ない。
+- Cloud Run ブラウザアクセスが `Forbidden` になる。
+- `/docs` が `401 Authentication required` になる。
+- Cloud Run Jobs 実行結果が `n_total: 0` になる。
