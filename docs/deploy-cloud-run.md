@@ -250,6 +250,17 @@ gcloud run jobs create claude-a11y-runner-env-sheet \
   --task-timeout 3600
 ```
 
+
+### Jobs タブの URL 入力例
+
+Cloud Run Jobs で実運用ページを処理する場合は、`Jobs.input_file` に Drive 内ファイル名ではなく URL を指定できます。URL 入力では runner が HTML を取得し、`body_xpath` で本文領域だけを抽出して AI 修正対象にします。`body_xpath` は Jobs 行の値が最優先で、空欄の場合は `Sites.body_xpath`、さらに空欄の場合は `Config.body_xpath`、すべて空欄なら `body` 要素全体を使います。
+
+| job_id | site | page_id | input_file | body_xpath | provider | priority | status | promote_requested | notes |
+| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- |
+| test-url-001 | saga-city | test-url-001 | `https://www.example.jp/sample/page.html` | `//*[@id="contents-in"]` | gemini | 1 | queued | false | URL input test |
+
+`page_id` は必須です。URL から自動生成されないため、出力先の Drive パスに使う ID を明示してください。
+
 実行例:
 
 ```bash

@@ -6,8 +6,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Callable
+
+import requests
+from lxml import html as lxml_html
 
 from .drive import DriveStore
 from .models import PageResult
@@ -24,6 +28,9 @@ from .sheets import SheetStore, ensure_schema
 from . import engine_adapter
 
 EngineFn = Callable[..., PageResult]
+
+HTTP_INPUT_TIMEOUT_SECONDS = 30
+HTTP_INPUT_USER_AGENT = "claude-a11y-agent/0.1 (+https://github.com/)"
 
 
 class RunnerError(RuntimeError):
@@ -229,8 +236,8 @@ def _run_one_job(store: SheetStore, drive: DriveStore, job: dict, *, config: dic
 
     provider = job.get("provider") or config.get("llm_provider", "gemini")
     mode = config.get("run_mode", "batch") or "batch"
-    body_xpath = sites.get(site, {}).get("body_xpath", "") or None
-    old_html = drive.read_text(config.get("drive_input_folder_id", ""), _input_path(job, site, page_id))
+    body_xpath = _body_xpath(job, site, sites, config)
+    old_html = _load_input_html(drive, job, site, page_id, config, body_xpath=body_xpath)
     result = engine(old_html, site=site, page_id=page_id, body_xpath=body_xpath, provider=provider, mode=mode)
     ai_path = f"{site}/{page_id}.html"
     ai_link = drive.write_text(config.get("drive_output_ai_folder_id", ""), ai_path, result.ai_html)
@@ -275,6 +282,56 @@ def _config_dict(store: SheetStore) -> dict:
 
 def _site_config(store: SheetStore) -> dict:
     return {row.get("site", ""): row for row in store.get_rows(SITES_TAB) if row.get("site")}
+
+
+def _load_input_html(drive: DriveStore, job: dict, site: str, page_id: str, config: dict, *, body_xpath: str | None) -> str:
+    input_value = str(job.get("input_file") or "").strip()
+    if _is_url(input_value):
+        return _extract_body_html(_fetch_url_html(input_value), body_xpath)
+    return drive.read_text(config.get("drive_input_folder_id", ""), _input_path(job, site, page_id))
+
+
+def _is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _fetch_url_html(url: str) -> str:
+    response = requests.get(
+        url,
+        headers={"User-Agent": HTTP_INPUT_USER_AGENT},
+        timeout=HTTP_INPUT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    if not response.encoding and response.apparent_encoding:
+        response.encoding = response.apparent_encoding
+    elif response.apparent_encoding and response.encoding.lower() in {"iso-8859-1", "ascii"}:
+        response.encoding = response.apparent_encoding
+    return response.text
+
+
+def _body_xpath(job: dict, site: str, sites: dict, config: dict) -> str | None:
+    return (
+        str(job.get("body_xpath") or "").strip()
+        or str(sites.get(site, {}).get("body_xpath") or "").strip()
+        or str(config.get("body_xpath") or "").strip()
+        or None
+    )
+
+
+def _extract_body_html(source_html: str, body_xpath: str | None) -> str:
+    root = lxml_html.fromstring(source_html)
+    if body_xpath:
+        matches = root.xpath(body_xpath)
+        if not matches:
+            raise RunnerError(f"body_xpath not found: {body_xpath}")
+        element = matches[0]
+    else:
+        matches = root.xpath("//body")
+        element = matches[0] if matches else root
+    if not hasattr(element, "tag"):
+        raise RunnerError(f"body_xpath did not select an HTML element: {body_xpath}")
+    return lxml_html.tostring(element, encoding="unicode", method="html")
 
 
 def _truthy(value) -> bool:
