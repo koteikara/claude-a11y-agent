@@ -17,6 +17,7 @@ JOBS_HEADERS = [
     "site",
     "page_id",
     "input_file",
+    "body_xpath",
     "provider",
     "priority",
     "status",
@@ -79,6 +80,7 @@ DEFAULT_CONFIG = {
     "drive_input_folder_id": "",
     "drive_output_ai_folder_id": "",
     "drive_output_gold_folder_id": "",
+    "body_xpath": "",
     "run_mode": "batch",
     "default_site": "saga-city",
 }
