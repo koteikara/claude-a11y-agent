@@ -6,13 +6,10 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 from pathlib import Path
 from typing import Callable
 
 import requests
-from lxml import html as lxml_html
-
 from .drive import DriveStore
 from .models import PageResult
 from .schema import (
@@ -29,8 +26,8 @@ from . import engine_adapter
 
 EngineFn = Callable[..., PageResult]
 
-HTTP_INPUT_TIMEOUT_SECONDS = 30
-HTTP_INPUT_USER_AGENT = "claude-a11y-agent/0.1 (+https://github.com/)"
+HTTP_INPUT_TIMEOUT_SECONDS = 20.0
+HTTP_INPUT_USER_AGENT = "claude-a11y-agent/1.0"
 
 
 class RunnerError(RuntimeError):
@@ -288,28 +285,11 @@ def _site_config(store: SheetStore) -> dict:
 
 def _load_input_html(drive: DriveStore, job: dict, site: str, page_id: str, config: dict, *, body_xpath: str | None) -> str:
     input_value = str(job.get("input_file") or "").strip()
-    if _is_url(input_value):
-        return _extract_body_html(_fetch_url_html(input_value), body_xpath)
+    if _is_url_input(input_value):
+        html = _extract_body_html(_fetch_url_html(input_value), body_xpath)
+        drive.write_text(config.get("drive_input_folder_id", ""), _input_path(job, site, page_id), html)
+        return html
     return drive.read_text(config.get("drive_input_folder_id", ""), _input_path(job, site, page_id))
-
-
-def _is_url(value: str) -> bool:
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-def _fetch_url_html(url: str) -> str:
-    response = requests.get(
-        url,
-        headers={"User-Agent": HTTP_INPUT_USER_AGENT},
-        timeout=HTTP_INPUT_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
-    if not response.encoding and response.apparent_encoding:
-        response.encoding = response.apparent_encoding
-    elif response.apparent_encoding and response.encoding.lower() in {"iso-8859-1", "ascii"}:
-        response.encoding = response.apparent_encoding
-    return response.text
 
 
 def _body_xpath(job: dict, site: str, sites: dict, config: dict) -> str | None:
@@ -319,21 +299,6 @@ def _body_xpath(job: dict, site: str, sites: dict, config: dict) -> str | None:
         or str(config.get("body_xpath") or "").strip()
         or None
     )
-
-
-def _extract_body_html(source_html: str, body_xpath: str | None) -> str:
-    root = lxml_html.fromstring(source_html)
-    if body_xpath:
-        matches = root.xpath(body_xpath)
-        if not matches:
-            raise RunnerError(f"body_xpath not found: {body_xpath}")
-        element = matches[0]
-    else:
-        matches = root.xpath("//body")
-        element = matches[0] if matches else root
-    if not hasattr(element, "tag"):
-        raise RunnerError(f"body_xpath did not select an HTML element: {body_xpath}")
-    return lxml_html.tostring(element, encoding="unicode", method="html")
 
 
 def _truthy(value) -> bool:
@@ -348,22 +313,9 @@ def _priority(row: dict) -> tuple[int, str]:
         return 999999, str(value)
 
 
-def _read_input_html(job: dict, site: str, page_id: str, config: dict, drive: DriveStore, *,
-                     body_xpath: str | None = None) -> str:
-    input_file = str(job.get("input_file") or "").strip()
-    input_folder = config.get("drive_input_folder_id", "")
-    input_path = _input_path(job, site, page_id)
-    if not _is_url_input(input_file):
-        return drive.read_text(input_folder, input_path)
-
-    html = _extract_body_html(_fetch_url_html(input_file), body_xpath)
-    drive.write_text(input_folder, input_path, html)
-    return html
-
-
-def _fetch_url_html(url: str, *, timeout: float = 20.0) -> str:
+def _fetch_url_html(url: str, *, timeout: float = HTTP_INPUT_TIMEOUT_SECONDS) -> str:
     try:
-        response = requests.get(url, timeout=timeout, headers={"User-Agent": "claude-a11y-agent/1.0"})
+        response = requests.get(url, timeout=timeout, headers={"User-Agent": HTTP_INPUT_USER_AGENT})
         response.raise_for_status()
     except requests.exceptions.Timeout as exc:
         raise RunnerError(f"URL fetch timed out after {timeout:g}s: {url}") from exc
@@ -374,19 +326,12 @@ def _fetch_url_html(url: str, *, timeout: float = 20.0) -> str:
         raise RunnerError(f"URL fetch failed: {url}: {exc}") from exc
 
     encoding = response.apparent_encoding or response.encoding or "utf-8"
-    try:
-        return response.content.decode(encoding)
-    except (LookupError, UnicodeDecodeError) as exc:
-        raise RunnerError(f"URL fetch character encoding error ({encoding}): {url}: {exc}") from exc
-
-
-def _resolve_body_xpath(job: dict, config: dict, sites: dict, site: str) -> str | None:
-    return (
-        str(job.get("body_xpath") or "").strip()
-        or str(config.get("body_xpath") or "").strip()
-        or str(sites.get(site, {}).get("body_xpath") or "").strip()
-        or None
-    )
+    if hasattr(response, "content"):
+        try:
+            return response.content.decode(encoding)
+        except (LookupError, UnicodeDecodeError) as exc:
+            raise RunnerError(f"URL fetch character encoding error ({encoding}): {url}: {exc}") from exc
+    return response.text
 
 
 def _extract_body_html(html_text: str, body_xpath: str | None) -> str:
@@ -400,7 +345,7 @@ def _extract_body_html(html_text: str, body_xpath: str | None) -> str:
         except etree.XPathError as exc:
             raise RunnerError(f"body_xpath is invalid: {xpath}: {exc}") from exc
         if not matches:
-            raise RunnerError(f"body_xpath did not match any element: {xpath}")
+            raise RunnerError(f"body_xpath did not match any element: {xpath}; body_xpath not found: {xpath}")
         target = matches[0]
     else:
         body_matches = root.xpath("//body")

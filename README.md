@@ -30,15 +30,17 @@ Cloud Run Service / Cloud Run Jobs の構築手順は [`docs/cloud-run-setup-che
 
 ## `input_file` と URL 入力の現状
 
-現行実装では、runner は `Jobs.input_file` を **Google Drive 入力フォルダ内のファイル名またはパス** として扱います。空欄の場合は `site/page_id.html` を読みます。
+runner は `Jobs.input_file` に Google Drive 入力フォルダ内のファイル名またはパス、または `http://` / `https://` の実在 URL を指定できます。空欄の場合は従来どおり `site/page_id.html` を Drive 入力から読みます。
 
-実運用では `input_file` に実在 URL を指定し、取得した HTML から `body_xpath` で本文領域だけを抽出して処理する方針ですが、この URL 入力対応はまだ未実装です。詳細な対応予定と未実装事項は [`docs/url-input-and-body-xpath.md`](docs/url-input-and-body-xpath.md) を参照してください。
+URL 入力の場合、runner は URL から HTML を取得し、`body_xpath` が指定されていれば一致した先頭要素の `outerHTML` だけを処理対象にします。`body_xpath` は `Jobs.body_xpath`、`Sites.body_xpath`、`Config.body_xpath` の順に解決し、未指定なら `body` 要素全体を処理します。詳細仕様は [`docs/url-input-and-body-xpath.md`](docs/url-input-and-body-xpath.md) を参照してください。
+
+`check_gold` は現在も Google Drive 入力と gold 出力の比較を前提にしており、URL から old HTML を再取得する用途には対応していません。
 
 ## ドキュメント
 
 - Cloud Run 構築チェックリスト: [`docs/cloud-run-setup-checklist.md`](docs/cloud-run-setup-checklist.md)
 - Cloud Run 詳細手順: [`docs/deploy-cloud-run.md`](docs/deploy-cloud-run.md)
-- URL 入力と `body_xpath` 方針: [`docs/url-input-and-body-xpath.md`](docs/url-input-and-body-xpath.md)
+- URL 入力と `body_xpath` 仕様: [`docs/url-input-and-body-xpath.md`](docs/url-input-and-body-xpath.md)
 - Cloud Run トラブルシュート: [`docs/troubleshooting-cloud-run.md`](docs/troubleshooting-cloud-run.md)
 - 開発者向け詳細: [`docs/開発者向け.md`](docs/開発者向け.md)
 - 用語集: [`docs/用語集.md`](docs/用語集.md)
