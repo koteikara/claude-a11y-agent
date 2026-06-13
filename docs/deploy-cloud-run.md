@@ -234,6 +234,15 @@ gcloud run jobs create claude-a11y-runner \
   --task-timeout 3600
 ```
 
+
+Jobs タブには、Drive 入力フォルダ内のファイル名だけでなく、実在 URL も `input_file` に指定できます。URL 入力の場合は `body_xpath` に一致する本文要素だけを抽出し、AI 出力と gold 出力は既存の Drive 出力フォルダへ保存されます。
+
+| job_id | site | page_id | input_file | body_xpath | provider | priority | status | promote_requested | notes |
+|---|---|---|---|---|---|---:|---|---|---|
+| `test-url-001` | `saga-city` | `test-url-001` | `https://www.example.jp/sample/page.html` | `//*[@id="contents-in"]` | `gemini` | `1` | `queued` | `false` | `URL input test` |
+
+`body_xpath` を Jobs 行で空にした場合は、Config タブの `body_xpath` を fallback として参照します。
+
 `A11Y_SHEET_ID` を環境変数にして `--sheet` を省略する例です。
 
 ```bash

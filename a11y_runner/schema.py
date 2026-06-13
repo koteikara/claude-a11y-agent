@@ -80,6 +80,7 @@ DEFAULT_CONFIG = {
     "drive_input_folder_id": "",
     "drive_output_ai_folder_id": "",
     "drive_output_gold_folder_id": "",
+    "body_xpath": "",
     "run_mode": "batch",
     "default_site": "saga-city",
     "body_xpath": "",
